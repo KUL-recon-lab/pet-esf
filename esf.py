@@ -14,8 +14,9 @@ from utils import rebin_xy
 # %%
 # input parameters
 
-fname: Path = Path("smallest_voxels_first_9min_30it_0310.nii")
-# fname: Path = Path("smallest_voxels_first_9min_7it_nopsf_0309.nii")
+data_dir = Path("W:/schramm_lab/georg_schramm/tmp/nx_hot")
+fname: Path = data_dir / "smallest_voxels_first_9min_7it_0311.nii.gz"
+# fname: Path = data_dir / "smallest_voxels_first_9min_7it_nopsf_0309.nii"
 lam = 0.3
 nbins = 256
 cube_diam_mm = 35.0
@@ -23,7 +24,7 @@ edge = "xs"
 
 ################################################################################
 # %%
-# READ THE DATA FROM NIFTI
+# READ THE DATA FROM NIFTI, orient to RAS
 
 nii = nib.as_closest_canonical(nib.load(fname))
 pet = nii.get_fdata()
@@ -95,6 +96,7 @@ else:
     np.savetxt(coreg_file, coreg_aff)
 
 pet_coreg = pymi.aff_transform(pet, coreg_aff, pet.shape)
+mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
 
 ################################################################################
 # %%
@@ -264,4 +266,17 @@ ax[1].set_title("normalized LSF", fontsize="medium")
 
 fig.show()
 
-vi = pv.ThreeAxisViewer([pet_coreg, mask / mask.max() + 2 * roi_img], voxsize=voxsize)
+# show the aligned images with the ROI
+# the viewer expects the images in LPS orientation, so we flip the images accordingly
+vi = pv.ThreeAxisViewer(
+    [
+        np.flip(x, (0, 1))
+        for x in [
+            pet_coreg,
+            mask / mask.max() + 2.0 * roi_img,
+            pet,
+            mask_coreg / mask_coreg.max() + 2.0 * roi_img_coreg,
+        ]
+    ],
+    voxsize=voxsize,
+)
