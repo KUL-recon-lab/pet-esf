@@ -16,12 +16,17 @@ from utils import rebin_xy
 
 data_dir = Path("W:/schramm_lab/georg_schramm/tmp/nx_hot")
 fname: Path = data_dir / "smallest_voxels_first_9min_7it_0311.nii.gz"
-# fname: Path = data_dir / "smallest_voxels_first_9min_7it_nopsf_0309.nii"
-lam = 0.3
-nbins = 256
-cube_diam_mm = 35.0
-edge = "xs"
+# fname: Path = data_dir / "smallest_voxels_first_9min_7it_nopsf_0309.nii.gz"
 
+nbins: int = 256
+cube_diam_mm: float = 35.0
+edge: str = "xs"
+
+# radii of the ROI of voxels that contribute to ESF calculation
+r1: float = 10.0
+r2 = 8.0
+
+lam: float = 0.4  # smoothing spline regularization parameter
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
@@ -102,9 +107,6 @@ mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
 # %%
 # create a ROI image indicating the region of interest used for LSF
 roi_img = np.zeros_like(pet)
-
-r1 = 8.0
-r2 = 8.0
 
 if edge.startswith("x"):
     if edge == "xs":
