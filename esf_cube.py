@@ -26,7 +26,7 @@ parser.add_argument(
     "--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)"
 )
 parser.add_argument(
-    "--r1", type=float, default=6.0, help="outer ROI radius in mm along edge direction"
+    "--r1", type=float, default=10.0, help="outer ROI radius in mm along edge direction"
 )
 parser.add_argument(
     "--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge"
@@ -96,7 +96,7 @@ if interp_z:
     # Odd new indices are the average of two neighboring original planes.
     nz = pet.shape[2]
     pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
-    pet_interp[:, :, 0::2] = pet                                   # original planes
+    pet_interp[:, :, 0::2] = pet  # original planes
     pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
     pet = pet_interp
     voxsize = voxsize.copy()
@@ -256,14 +256,16 @@ sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
 # spline = make_smoothing_spline(sd, signal, lam=15.0)
 spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
 
-esf = spline(sd_binned)
-lsf = spline.derivative(1)(sd_binned)
+ss = np.linspace(sd.min(), sd.max(), 1000)
+
+esf = spline(ss)
+lsf = spline.derivative(1)(ss)
 nlsf = lsf / lsf.max()
 
-roots_half = InterpolatedUnivariateSpline(sd_binned, lsf - 0.5 * lsf.max()).roots()
+roots_half = InterpolatedUnivariateSpline(ss, lsf - 0.5 * lsf.max()).roots()
 fwhm = roots_half[-1] - roots_half[0]
 
-roots_tenth = InterpolatedUnivariateSpline(sd_binned, lsf - 0.1 * lsf.max()).roots()
+roots_tenth = InterpolatedUnivariateSpline(ss, lsf - 0.1 * lsf.max()).roots()
 fwtm = roots_tenth[-1] - roots_tenth[0]
 
 print(
@@ -277,8 +279,8 @@ print(
 fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
 ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
 ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
-ax[0].plot(sd_binned, esf, "-", color="C1")
-ax[1].plot(sd_binned, nlsf, "-")
+ax[0].plot(ss, esf, "-", color="C1")
+ax[1].plot(ss, nlsf, "-")
 
 # indicate FWHM in normalized coordinates (0 to 1)
 xmin_ax, xmax_ax = ax[1].get_xlim()
