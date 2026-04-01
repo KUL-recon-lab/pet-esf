@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import nibabel as nib
 import pymirc.viewer as pv
@@ -13,20 +14,25 @@ from utils import rebin_xy
 
 # %%
 # input parameters
+parser = argparse.ArgumentParser()
+parser.add_argument("fname", type=Path, help="path to the NIfTI file")
+parser.add_argument("--nbins", type=int, default=256, help="number of bins for rebinning")
+parser.add_argument("--cube_diam_mm", type=float, default=14.96, help="cube diameter in mm")
+parser.add_argument("--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)")
+parser.add_argument("--r1", type=float, default=6.0, help="outer ROI radius in mm along edge direction")
+parser.add_argument("--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge")
+parser.add_argument("--lam", type=float, default=0.5, help="smoothing spline regularization parameter")
+args = parser.parse_args()
 
-data_dir = Path("W:/schramm_lab/georg_schramm/tmp/nx_hot")
-fname: Path = data_dir / "smallest_voxels_first_9min_7it_0311.nii.gz"
-# fname: Path = data_dir / "smallest_voxels_first_9min_7it_nopsf_0309.nii.gz"
+fname: Path = args.fname
+data_dir: Path = fname.parent
+nbins: int = args.nbins
+cube_diam_mm: float = args.cube_diam_mm
+edge: str = args.edge
+r1: float = args.r1
+r2: float = args.r2
+lam: float = args.lam
 
-nbins: int = 256
-cube_diam_mm: float = 35.0
-edge: str = "xs"
-
-# radii of the ROI of voxels that contribute to ESF calculation
-r1: float = 10.0
-r2 = 8.0
-
-lam: float = 0.4  # smoothing spline regularization parameter
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
@@ -71,7 +77,7 @@ cube_diam_vox = np.round(cube_diam_mm / voxsize).astype(int)
 
 mask = np.zeros_like(pet)
 
-# fill the center of the mask with a cube of diameter 30mm
+# fill the center of the mask with a cube
 center = np.array(center_of_mass(pet)).astype(int)
 start = center - cube_diam_vox // 2
 end = start + cube_diam_vox
@@ -226,11 +232,13 @@ nlsf = lsf / lsf.max()
 
 i2 = np.where(nlsf > 0.5)[0]
 fwhm = sd_binned[i2[-1]] - sd_binned[i2[0]]
-print(f"FWHM: {fwhm:.2f} mm")
 
 i10 = np.where(nlsf > 0.1)[0]
 fwtm = sd_binned[i10[-1]] - sd_binned[i10[0]]
-print(f"FWTM: {fwtm:.2f} mm")
+
+print(
+    f"{data_dir.stem}; {fname.name}; {edge}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
+)
 
 ################################################################################
 # %%
