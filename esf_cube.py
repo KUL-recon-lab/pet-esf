@@ -6,7 +6,7 @@ import pymirc.image_operations as pymi
 import matplotlib.pyplot as plt
 import json
 
-from scipy.interpolate import make_smoothing_spline
+from scipy.interpolate import make_smoothing_spline, InterpolatedUnivariateSpline
 from scipy.ndimage import find_objects, center_of_mass, gaussian_filter
 
 from pathlib import Path
@@ -230,11 +230,11 @@ esf = spline(sd_binned)
 lsf = spline.derivative(1)(sd_binned)
 nlsf = lsf / lsf.max()
 
-i2 = np.where(nlsf > 0.5)[0]
-fwhm = sd_binned[i2[-1]] - sd_binned[i2[0]]
+roots_half = InterpolatedUnivariateSpline(sd_binned, lsf - 0.5 * lsf.max()).roots()
+fwhm = roots_half[-1] - roots_half[0]
 
-i10 = np.where(nlsf > 0.1)[0]
-fwtm = sd_binned[i10[-1]] - sd_binned[i10[0]]
+roots_tenth = InterpolatedUnivariateSpline(sd_binned, lsf - 0.1 * lsf.max()).roots()
+fwtm = roots_tenth[-1] - roots_tenth[0]
 
 print(
     f"{data_dir.stem}; {fname.name}; {edge}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
@@ -256,15 +256,15 @@ ax[1].axhline(
     0.5,
     color="gray",
     ls="--",
-    xmin=(sd_binned[i2[0]] - xmin_ax) / (xmax_ax - xmin_ax),
-    xmax=(sd_binned[i2[-1]] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
 )
 ax[1].axhline(
     0.1,
     color="gray",
     ls="--",
-    xmin=(sd_binned[i10[0]] - xmin_ax) / (xmax_ax - xmin_ax),
-    xmax=(sd_binned[i10[-1]] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
 )
 
 for axx in ax:
