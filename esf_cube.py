@@ -34,6 +34,12 @@ parser.add_argument(
 parser.add_argument(
     "--lam", type=float, default=0.5, help="smoothing spline regularization parameter"
 )
+parser.add_argument(
+    "--interp_z",
+    action="store_true",
+    default=False,
+    help="interpolate by factor 2 in z after cropping (linear, half-voxel shift)",
+)
 args = parser.parse_args()
 
 fname: Path = args.fname
@@ -44,6 +50,7 @@ edge: str = args.edge
 r1: float = args.r1
 r2: float = args.r2
 lam: float = args.lam
+interp_z: bool = args.interp_z
 
 ################################################################################
 # %%
@@ -81,6 +88,19 @@ else:
 
 pet_full = pet.copy()
 pet = pet[slices]
+
+if interp_z:
+    # Interpolate by factor 2 in z using half-voxel-shifted sampling.
+    # New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
+    # Even new indices map to original planes (no interpolation needed).
+    # Odd new indices are the average of two neighboring original planes.
+    nz = pet.shape[2]
+    pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
+    pet_interp[:, :, 0::2] = pet                                   # original planes
+    pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
+    pet = pet_interp
+    voxsize = voxsize.copy()
+    voxsize[2] /= 2
 
 ################################################################################
 # %%
