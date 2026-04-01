@@ -16,12 +16,24 @@ from utils import rebin_xy
 # input parameters
 parser = argparse.ArgumentParser()
 parser.add_argument("fname", type=Path, help="path to the NIfTI file")
-parser.add_argument("--nbins", type=int, default=256, help="number of bins for rebinning")
-parser.add_argument("--cube_diam_mm", type=float, default=14.96, help="cube diameter in mm")
-parser.add_argument("--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)")
-parser.add_argument("--r1", type=float, default=6.0, help="outer ROI radius in mm along edge direction")
-parser.add_argument("--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge")
-parser.add_argument("--lam", type=float, default=0.5, help="smoothing spline regularization parameter")
+parser.add_argument(
+    "--nbins", type=int, default=256, help="number of bins for rebinning"
+)
+parser.add_argument(
+    "--cube_diam_mm", type=float, default=14.96, help="cube diameter in mm"
+)
+parser.add_argument(
+    "--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)"
+)
+parser.add_argument(
+    "--r1", type=float, default=6.0, help="outer ROI radius in mm along edge direction"
+)
+parser.add_argument(
+    "--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge"
+)
+parser.add_argument(
+    "--lam", type=float, default=0.5, help="smoothing spline regularization parameter"
+)
 args = parser.parse_args()
 
 fname: Path = args.fname
@@ -172,6 +184,7 @@ end_x = min(pet.shape[0], end_x)
 end_y = min(pet.shape[1], end_y)
 end_z = min(pet.shape[2], end_z)
 
+roi_img[start_x:end_x, start_y:end_y, start_z:end_z] = 1
 ################################################################################
 # %%
 # calculate the distance from the edge
@@ -200,9 +213,6 @@ signed_distance = (
 
 ################################################################################
 # %%
-# extract the signal and distance values for the voxels in the ROI, sort by distance, and normalize the signal
-
-roi_img[start_x:end_x, start_y:end_y, start_z:end_z] = 1
 
 # transform the roi_img to the tilted space
 roi_img_coreg = pymi.aff_transform(
