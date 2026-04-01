@@ -103,19 +103,45 @@ if interp_z:
     voxsize[2] /= 2
 
 ################################################################################
+## %%
+## generate a reference image (mask) that we can use for registration
+# cube_diam_vox = np.round(cube_diam_mm / voxsize).astype(int)
+#
+# mask = np.zeros_like(pet)
+#
+## fill the center of the mask with a cube
+# center = np.array(center_of_mass(pet)).astype(int)
+# start = center - cube_diam_vox // 2
+# end = start + cube_diam_vox
+# mask[start[0] : end[0], start[1] : end[1], start[2] : end[2]] = 1.0
+#
+# mask *= float(pet.sum() / mask.sum())
+
+
+################################################################################
 # %%
-# generate a reference image (mask) that we can use for registration
-cube_diam_vox = np.round(cube_diam_mm / voxsize).astype(int)
+# alternative mask: sum of two cubes offset by half-diameter in all three axes
+
+center = np.array(center_of_mass(pet)).astype(int)
+
+# this is the diameter of a the single "filled" cube
+inner_cube_diam_mm = (50 - 6) * 2 / 3  # ~30 mm
+inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
+# the center offset of the two cubes, before adding them
+offset_vox = np.round((inner_cube_diam_mm / 4) / voxsize).astype(int)
+offset_vox[0] *= -1
 
 mask = np.zeros_like(pet)
-
-# fill the center of the mask with a cube
-center = np.array(center_of_mass(pet)).astype(int)
-start = center - cube_diam_vox // 2
-end = start + cube_diam_vox
-mask[start[0] : end[0], start[1] : end[1], start[2] : end[2]] = 1.0
+for sign in (+1, -1):
+    c = center + sign * offset_vox
+    start2 = c - inner_cube_diam_vox // 2
+    end2 = start2 + inner_cube_diam_vox
+    mask[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += 1.0
 
 mask *= float(pet.sum() / mask.sum())
+
+start = center - np.sign(offset_vox) * offset_vox
+end = center + np.sign(offset_vox) * offset_vox
 
 
 ################################################################################
