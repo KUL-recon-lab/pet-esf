@@ -9,3 +9,4 @@ dependencies:
   - matplotlib 
   - scipy 
   - dcmtk
+  - dcm2nixx
