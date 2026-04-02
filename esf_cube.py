@@ -309,7 +309,7 @@ signal = pet[roi_img_coreg].ravel()
 inds = np.argsort(sd)
 sd = sd[inds]
 signal = signal[inds]
-signal /= signal.max()
+signal /= signal[np.argmax(sd)]
 
 sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
 
@@ -322,6 +322,8 @@ esf = spline(ss)
 lsf = spline.derivative(1)(ss)
 nlsf = lsf / lsf.max()
 
+contrast = esf[-1] / esf[0]
+
 roots_half = InterpolatedUnivariateSpline(ss, lsf - 0.5 * lsf.max()).roots()
 fwhm = roots_half[-1] - roots_half[0]
 
@@ -329,7 +331,7 @@ roots_tenth = InterpolatedUnivariateSpline(ss, lsf - 0.1 * lsf.max()).roots()
 fwtm = roots_tenth[-1] - roots_tenth[0]
 
 print(
-    f"{data_dir.stem}; {fname.name}; {edge}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
+    f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
 )
 
 ################################################################################
@@ -340,6 +342,7 @@ fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
 ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
 ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
 ax[0].plot(ss, esf, "-", color="C1")
+ax[0].set_ylim(-0.05, 1.05 * esf.max())
 ax[1].plot(ss, nlsf, "-")
 
 # indicate FWHM in normalized coordinates (0 to 1)
