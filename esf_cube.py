@@ -40,6 +40,18 @@ parser.add_argument(
     default=False,
     help="interpolate by factor 2 in z after cropping (linear, half-voxel shift)",
 )
+parser.add_argument(
+    "--interp_x",
+    action="store_true",
+    default=False,
+    help="interpolate by factor 2 in x after cropping (linear, half-voxel shift)",
+)
+parser.add_argument(
+    "--interp_y",
+    action="store_true",
+    default=False,
+    help="interpolate by factor 2 in y after cropping (linear, half-voxel shift)",
+)
 args = parser.parse_args()
 
 fname: Path = args.fname
@@ -51,6 +63,8 @@ r1: float = args.r1
 r2: float = args.r2
 lam: float = args.lam
 interp_z: bool = args.interp_z
+interp_x: bool = args.interp_x
+interp_y: bool = args.interp_y
 
 ################################################################################
 # %%
@@ -88,6 +102,26 @@ else:
 
 pet_full = pet.copy()
 pet = pet[slices]
+
+if interp_x:
+    # Interpolate by factor 2 in x using half-voxel-shifted sampling.
+    nx = pet.shape[0]
+    pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
+    pet_interp[0::2, :, :] = pet  # original planes
+    pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
+    pet = pet_interp
+    voxsize = voxsize.copy()
+    voxsize[0] /= 2
+
+if interp_y:
+    # Interpolate by factor 2 in y using half-voxel-shifted sampling.
+    ny = pet.shape[1]
+    pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
+    pet_interp[:, 0::2, :] = pet  # original planes
+    pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
+    pet = pet_interp
+    voxsize = voxsize.copy()
+    voxsize[1] /= 2
 
 if interp_z:
     # Interpolate by factor 2 in z using half-voxel-shifted sampling.
