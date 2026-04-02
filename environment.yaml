@@ -1,0 +1,11 @@
+name: esf
+
+channels:
+  - conda-forge
+
+dependencies:
+  - numpy 
+  - nibabel 
+  - matplotlib 
+  - scipy 
+  - dcmtk
