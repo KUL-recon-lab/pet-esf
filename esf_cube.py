@@ -137,6 +137,11 @@ if interp_z:
     voxsize = voxsize.copy()
     voxsize[2] /= 2
 
+# ensure odd size in all dimensions by padding with a single zero if needed
+pad_width = [(0, s % 2 == 0) for s in pet.shape]
+if any(p[1] for p in pad_width):
+    pet = np.pad(pet, pad_width)
+
 ################################################################################
 # %%
 # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
@@ -146,30 +151,55 @@ intensities = sorted(bin_edges[peaks])
 
 ################################################################################
 # %%
-center = np.array(center_of_mass(pet)).astype(int)
+# center of the mass of the image in voxel coordinates
+# center = np.array(center_of_mass(pet)).astype(int)
+center = np.array(pet.shape) // 2
+# world coordinates, such that center voxel is at (0m, 0m, 0m)
+# to go from voxel index to world coordinate: world = (index - center) * voxsize
+# to go from world coordinate to voxel index: index = world / voxsize + center
+center_mm = (center - center) * voxsize
 
 # this is the diameter of a the single "filled" cube
 inner_cube_diam_mm = 29.6  # (50 - 6) * 2 / 3  # ~30 mm
 inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
-# the center offset of the two cubes, before adding them
-offset_vox = np.round(6.45 / voxsize).astype(int)
-offset_vox[0] *= -1
+# the center offset of the two cubes, before adding them (half the distance between the centers of the two cubes)
+offset_mm = 6.45 * np.array([-1.0, 1.0, 1.0])
+offset_vox = np.round(offset_mm / voxsize).astype(int)
+# offset_vox[0] *= -1
 
+mask1 = np.zeros_like(pet)
+mask2 = np.zeros_like(pet)
 mask = np.zeros_like(pet)
-for i_s, sign in enumerate((-1, +1)):
-    c = center + sign * offset_vox
-    start2 = c - inner_cube_diam_vox // 2
-    end2 = start2 + inner_cube_diam_vox
-    mask[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += (
-        1.0 * intensities[i_s]
-    )
 
-# mask *= float(pet.sum() / mask.sum())
+# first cube mask
+c1 = center - offset_vox
+c1_mm = center_mm - offset_mm
 
-ddx = (inner_cube_diam_vox // 2) - 2 * offset_vox * np.sign(offset_vox)
-start = center - np.sign(offset_vox) * (offset_vox) - ddx
-end = center + np.sign(offset_vox) * (offset_vox) + ddx
+start1 = c1 - inner_cube_diam_vox // 2
+start1_mm = c1_mm - inner_cube_diam_mm / 2
 
+end1 = start1 + inner_cube_diam_vox
+end1_mm = start1_mm + inner_cube_diam_mm
+
+mask1[start1[0] : end1[0], start1[1] : end1[1], start1[2] : end1[2]] += (
+    1.0 * intensities[0]
+)
+
+# second cube mask
+c2 = center + offset_vox
+start2 = c2 - inner_cube_diam_vox // 2
+end2 = start2 + inner_cube_diam_vox
+mask2[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += (
+    1.0 * intensities[1]
+)
+
+mask = mask1 + mask2
+
+start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
+end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
+
+start = np.round(start_mm / voxsize + center).astype(int)
+end = np.round(end_mm / voxsize + center).astype(int)
 
 ################################################################################
 # %%
