@@ -137,22 +137,6 @@ if interp_z:
     voxsize[2] /= 2
 
 ################################################################################
-## %%
-## generate a reference image (mask) that we can use for registration
-# cube_diam_vox = np.round(cube_diam_mm / voxsize).astype(int)
-#
-# mask = np.zeros_like(pet)
-#
-## fill the center of the mask with a cube
-# center = np.array(center_of_mass(pet)).astype(int)
-# start = center - cube_diam_vox // 2
-# end = start + cube_diam_vox
-# mask[start[0] : end[0], start[1] : end[1], start[2] : end[2]] = 1.0
-#
-# mask *= float(pet.sum() / mask.sum())
-
-
-################################################################################
 # %%
 # alternative mask: sum of two cubes offset by half-diameter in all three axes
 
@@ -175,8 +159,9 @@ for sign in (+1, -1):
 
 mask *= float(pet.sum() / mask.sum())
 
-start = center - np.sign(offset_vox) * offset_vox
-end = center + np.sign(offset_vox) * offset_vox
+ddx = (inner_cube_diam_vox // 2) - 2 * offset_vox * np.sign(offset_vox)
+start = center - np.sign(offset_vox) * (offset_vox) - ddx
+end = center + np.sign(offset_vox) * (offset_vox) + ddx
 
 
 ################################################################################
@@ -185,8 +170,7 @@ end = center + np.sign(offset_vox) * offset_vox
 
 coreg_file = fname.parent / (fname.stem + "_coreg.txt")
 
-# if coreg_file.exists():
-if False:
+if coreg_file.exists():
     coreg_aff = np.loadtxt(coreg_file)
 else:
     _, coreg_aff, coreg_params = pymi.rigid_registration(
@@ -203,10 +187,11 @@ else:
 pet_coreg = pymi.aff_transform(pet, coreg_aff, pet.shape)
 mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
 
-fig, ax = plt.subplots()
-ax.plot(pet_coreg[:, 81, 69] / 1.9e6)
-ax.plot(mask[:, 81, 69] / 1.9e6)
-fig.show()
+# fig, ax = plt.subplots()
+# ax.plot(pet_coreg[:, 81, 69] / 1.9e6)
+# ax.plot(mask[:, 81, 69] / 1.9e6)
+# ax.grid(ls=":")
+# fig.show()
 ################################################################################
 # %%
 # create a ROI image indicating the region of interest used for LSF
