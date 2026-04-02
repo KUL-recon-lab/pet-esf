@@ -159,10 +159,11 @@ if interp_z:
 center = np.array(center_of_mass(pet)).astype(int)
 
 # this is the diameter of a the single "filled" cube
-inner_cube_diam_mm = (50 - 6) * 2 / 3  # ~30 mm
+inner_cube_diam_mm = 29.6  # (50 - 6) * 2 / 3  # ~30 mm
 inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
 # the center offset of the two cubes, before adding them
-offset_vox = np.round((inner_cube_diam_mm / 4) / voxsize).astype(int)
+# offset_vox = np.round((inner_cube_diam_mm / 4) / voxsize).astype(int)
+offset_vox = np.round(6.45 / voxsize).astype(int)
 offset_vox[0] *= -1
 
 mask = np.zeros_like(pet)
@@ -184,7 +185,8 @@ end = center + np.sign(offset_vox) * offset_vox
 
 coreg_file = fname.parent / (fname.stem + "_coreg.txt")
 
-if coreg_file.exists():
+# if coreg_file.exists():
+if False:
     coreg_aff = np.loadtxt(coreg_file)
 else:
     _, coreg_aff, coreg_params = pymi.rigid_registration(
@@ -201,6 +203,10 @@ else:
 pet_coreg = pymi.aff_transform(pet, coreg_aff, pet.shape)
 mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
 
+fig, ax = plt.subplots()
+ax.plot(pet_coreg[:, 81, 69] / 1.9e6)
+ax.plot(mask[:, 81, 69] / 1.9e6)
+fig.show()
 ################################################################################
 # %%
 # create a ROI image indicating the region of interest used for LSF
