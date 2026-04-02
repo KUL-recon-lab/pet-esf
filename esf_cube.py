@@ -67,6 +67,8 @@ interp_z: bool = args.interp_z
 interp_x: bool = args.interp_x
 interp_y: bool = args.interp_y
 
+inner_cube_diam_mm = 29.3
+offset_scalar_mm = 6.45
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
@@ -160,10 +162,9 @@ center = np.array(pet.shape) // 2
 center_mm = (center - center) * voxsize
 
 # this is the diameter of a the single "filled" cube
-inner_cube_diam_mm = 29.6  # (50 - 6) * 2 / 3  # ~30 mm
 inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
 # the center offset of the two cubes, before adding them (half the distance between the centers of the two cubes)
-offset_mm = 6.45 * np.array([-1.0, 1.0, 1.0])
+offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
 offset_vox = np.round(offset_mm / voxsize).astype(int)
 # offset_vox[0] *= -1
 
