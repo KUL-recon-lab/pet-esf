@@ -195,11 +195,13 @@ mask2[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += (
 
 mask = mask1 + mask2
 
+# world coordinates of the start and end of the edge between the two cubes
 start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
 end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
 
-start = np.round(start_mm / voxsize + center).astype(int)
-end = np.round(end_mm / voxsize + center).astype(int)
+# voxel coordinates of the start and end of the edge between the two cubes (float)
+start = start_mm / voxsize + center
+end = end_mm / voxsize + center
 
 ################################################################################
 # %%
@@ -224,11 +226,6 @@ else:
 pet_coreg = pymi.aff_transform(pet, coreg_aff, pet.shape)
 mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
 
-# fig, ax = plt.subplots()
-# ax.plot(pet_coreg[:, 81, 69] / 1.9e6)
-# ax.plot(mask[:, 81, 69] / 1.9e6)
-# ax.grid(ls=":")
-# fig.show()
 ################################################################################
 # %%
 # create a ROI image indicating the region of interest used for LSF
