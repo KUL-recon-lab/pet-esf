@@ -1,15 +1,16 @@
 import argparse
+import json
+from pathlib import Path
+
 import numpy as np
 import nibabel as nib
-import pymirc.viewer as pv
-import pymirc.image_operations as pymi
 import matplotlib.pyplot as plt
-import json
-
 from scipy.interpolate import make_smoothing_spline, InterpolatedUnivariateSpline
 from scipy.ndimage import find_objects, center_of_mass, gaussian_filter
+from scipy.signal import find_peaks
+import pymirc.viewer as pv
+import pymirc.image_operations as pymi
 
-from pathlib import Path
 from utils import rebin_xy
 
 # %%
@@ -138,26 +139,32 @@ if interp_z:
 
 ################################################################################
 # %%
-# alternative mask: sum of two cubes offset by half-diameter in all three axes
+# get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
+counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=200)
+peaks, _ = find_peaks(counts, distance=5, prominence=200)
+intensities = sorted(bin_edges[peaks])
 
+################################################################################
+# %%
 center = np.array(center_of_mass(pet)).astype(int)
 
 # this is the diameter of a the single "filled" cube
 inner_cube_diam_mm = 29.6  # (50 - 6) * 2 / 3  # ~30 mm
 inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
 # the center offset of the two cubes, before adding them
-# offset_vox = np.round((inner_cube_diam_mm / 4) / voxsize).astype(int)
 offset_vox = np.round(6.45 / voxsize).astype(int)
 offset_vox[0] *= -1
 
 mask = np.zeros_like(pet)
-for sign in (+1, -1):
+for i_s, sign in enumerate((-1, +1)):
     c = center + sign * offset_vox
     start2 = c - inner_cube_diam_vox // 2
     end2 = start2 + inner_cube_diam_vox
-    mask[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += 1.0
+    mask[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += (
+        1.0 * intensities[i_s]
+    )
 
-mask *= float(pet.sum() / mask.sum())
+# mask *= float(pet.sum() / mask.sum())
 
 ddx = (inner_cube_diam_vox // 2) - 2 * offset_vox * np.sign(offset_vox)
 start = center - np.sign(offset_vox) * (offset_vox) - ddx
