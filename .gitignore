@@ -1,6 +1,7 @@
 # user defined gitignore file for Python projects
 test.py
 .vscode/*
+.claude/*
 data/*
 
 # Byte-compiled / optimized / DLL files

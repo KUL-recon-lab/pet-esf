@@ -16,7 +16,7 @@ Physical coordinate convention
 
 Parameter vector convention
 ----------------------------
-  params = [tz, ty, tx, ωz, ωy, ωx]     shape (6,)
+  params = (tz, ty, tx, ωz, ωy, ωx)     length-6 tuple of floats
     • tz, ty, tx  : translation in mm, along axes (D, H, W)
     • ωz, ωy, ωx  : Rodrigues rotation vector in radians
 
@@ -25,27 +25,77 @@ Parameter vector convention
 
 Public API
 ----------
-  warp(image, params, voxel_size)                          → (D, H, W)
-  invert_params(params)                                    → (6,)
-  init_from_center_of_mass(fixed, moving, voxel_size)      → (6,)
-  register(fixed, moving, voxel_size, cost_fn, …)          → (6,)
-  register_multiscale(fixed, moving, voxel_size, cost_fn)  → (6,)
+  warp(image, params, voxel_size)                          → (D, H, W) Tensor
+  invert_params(params)                                    → tuple[float, ...]
+  register(fixed, moving, voxel_size, cost_fn, …)          → tuple[float, ...]
+
+  All image inputs accept torch.Tensor or np.ndarray.
+  All params inputs/outputs are tuples of 6 floats.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as TF
 from torch import Tensor
 
+# Type aliases
+Params = Tuple[float, float, float, float, float, float]
+ParamsLike = Union[Params, np.ndarray, Tensor]
+ImageLike = Union[Tensor, np.ndarray]
+VoxelSize = Union[Tuple[float, float, float], np.ndarray]
 
-def ssd(fixed: torch.Tensor, warped: torch.Tensor) -> torch.Tensor:
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _default_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _to_float_tensor(
+    x: ImageLike,
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> Tensor:
+    """Convert numpy array or tensor to a float tensor on *device*."""
+    if isinstance(x, np.ndarray):
+        return torch.tensor(x, device=device, dtype=dtype)
+    return x.to(device=device, dtype=dtype)
+
+
+def _image_device(x: ImageLike) -> torch.device:
+    """Return the device for an image input (auto-detect for numpy)."""
+    if isinstance(x, np.ndarray):
+        return _default_device()
+    return x.device
+
+
+def _params_to_tensor(
+    params: ParamsLike,
+    device: torch.device,
+    dtype: torch.dtype = torch.float32,
+) -> Tensor:
+    """Convert any params representation to a (6,) tensor on *device*."""
+    if isinstance(params, Tensor):
+        return params.detach().to(device=device, dtype=dtype)
+    return torch.tensor(list(params), device=device, dtype=dtype)
+
+
+def _tensor_to_params(t: Tensor) -> Params:
+    """Convert a (6,) tensor to a tuple of 6 plain floats."""
+    v = t.detach().cpu().tolist()
+    return (v[0], v[1], v[2], v[3], v[4], v[5])
+
+
+def ssd(fixed: Tensor, warped: Tensor) -> Tensor:
     return ((fixed - warped) ** 2).sum()
 
 
-def ncc(fixed, warped):  # normalised cross-correlation
+def ncc(fixed: Tensor, warped: Tensor) -> Tensor:  # normalised cross-correlation
     f = fixed - fixed.mean()
     w = warped - warped.mean()
     return -(f * w).sum() / (f.norm() * w.norm() + 1e-8)
@@ -150,66 +200,32 @@ def _smooth3d(vol5d: Tensor, sigmas: Tuple[float, float, float]) -> Tensor:
     return out
 
 
-def _smooth_and_downsample(
-    vol: Tensor,
-    scale: float,
-    voxel_size: Tuple[float, float, float],
-    sigma_vox: Tuple[float, float, float] | None = None,
-) -> Tuple[Tensor, Tuple[float, float, float], Tuple[int, int, int]]:
-    """
-    Smooth then downsample a (D, H, W) volume.
-
-    Anti-aliasing sigma defaults to 0.5 / scale per axis (in voxels),
-    which rolls off frequencies that would alias after downsampling
-    while still broadening the cost-function basin at coarse scales.
-
-    Returns (downsampled_volume, effective_voxel_size, new_shape).
-    The effective voxel size is computed exactly from the shape change
-    assuming align_corners=True throughout.
-    """
-    if sigma_vox is None:
-        s = max(0.5 / scale, 0.5)  # at least 0.5 even at full scale
-        sigma_vox = (s, s, s)
-
-    vol5d = vol[None, None]  # (1,1,D,H,W)
-    smooth = _smooth3d(vol5d, sigma_vox)
-    down = TF.interpolate(
-        smooth,
-        scale_factor=scale,
-        mode="trilinear",
-        align_corners=True,
-    )
-    vol_ds = down[0, 0]  # (D', H', W')
-
-    old_shape = tuple(vol.shape)  # (Nz, Ny, Nx)
-    new_shape = tuple(vol_ds.shape)  # (Nz', Ny', Nx')
-
-    # Exact voxel size: align_corners keeps corner-voxel centres fixed,
-    # so (N_old−1)·v_old = (N_new−1)·v_new
-    eff_vox = tuple(
-        (No - 1) / (Nn - 1) * v for No, Nn, v in zip(old_shape, new_shape, voxel_size)
-    )
-    return vol_ds, eff_vox, new_shape
-
-
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def invert_params(params: Tensor) -> Tensor:
+def invert_params(params: ParamsLike) -> Params:
     """
     Return parameters of the inverse transform T^{-1}.
     Uses the identity R(ω)^T = R(−ω) to avoid matrix inversion.
+
+    Args:
+        params: length-6 tuple/numpy array [tz, ty, tx, ωz, ωy, ωx].
+
+    Returns:
+        Inverse parameters as a tuple of 6 floats.
     """
-    rv = params[3:]
-    t = params[:3]
+    device = _default_device()
+    p = _params_to_tensor(params, device)
+    rv = p[3:]
+    t = p[:3]
     R_inv = _rotvec_to_matrix(-rv)
-    return torch.cat([-(R_inv @ t), -rv])
+    return _tensor_to_params(torch.cat([-(R_inv @ t), -rv]))
 
 
 def warp(
-    image: Tensor,
-    params: Tensor,
-    voxel_size: Tuple[float, float, float],
+    image: ImageLike,
+    params: ParamsLike,
+    voxel_size: VoxelSize,
     *,
     padding_mode: str = "border",
 ) -> Tensor:
@@ -217,20 +233,27 @@ def warp(
     Apply a rigid transform to a 3D image.
 
     Args:
-        image:        (D, H, W) float tensor.
-        params:       (6,) [tz, ty, tx, ωz, ωy, ωx].
+        image:        (D, H, W) float tensor or numpy array.
+                      If numpy, the device is chosen automatically
+                      (CUDA if available, otherwise CPU).
+        params:       length-6 tuple/numpy array [tz, ty, tx, ωz, ωy, ωx].
                       Translations in mm; angles in radians.
         voxel_size:   (vz, vy, vx) in mm.
         padding_mode: 'border' | 'zeros' | 'reflection'.
 
     Returns:
-        Warped image (D, H, W), same device as input.
+        Warped image (D, H, W) tensor on the same device as *image*.
     """
-    shape = tuple(image.shape)
-    R = _rotvec_to_matrix(params[3:])
-    grid = _make_sampling_grid(R, params[:3], shape, voxel_size, shape, voxel_size)
+    device = _image_device(image)
+    img = _to_float_tensor(image, device)
+    p = _params_to_tensor(params, device, img.dtype)
+    vox = tuple(float(v) for v in voxel_size)
+
+    shape = tuple(img.shape)
+    R = _rotvec_to_matrix(p[3:])
+    grid = _make_sampling_grid(R, p[:3], shape, vox, shape, vox)
     out = TF.grid_sample(
-        image[None, None],
+        img[None, None],
         grid,
         mode="bilinear",
         padding_mode=padding_mode,
@@ -239,65 +262,32 @@ def warp(
     return out[0, 0]
 
 
-def init_from_center_of_mass(
-    fixed: Tensor,
-    moving: Tensor,
-    voxel_size: Tuple[float, float, float],
-) -> Tensor:
-    """
-    Return (6,) params whose translation aligns the intensity-weighted
-    centres of mass (COM) of fixed and moving, with zero rotation.
-
-    COM is computed in physical (mm) space using the centred coordinate
-    convention.  Effective even when there is a large initial offset.
-
-    Note: assumes non-negative image intensities.  If your images can be
-    negative, clip or shift them before calling this function.
-    """
-    device, dtype = fixed.device, fixed.dtype
-    Nz, Ny, Nx = fixed.shape
-    vz, vy, vx = voxel_size
-
-    z_mm = (torch.arange(Nz, device=device, dtype=dtype) - (Nz - 1) / 2) * vz
-    y_mm = (torch.arange(Ny, device=device, dtype=dtype) - (Ny - 1) / 2) * vy
-    x_mm = (torch.arange(Nx, device=device, dtype=dtype) - (Nx - 1) / 2) * vx
-    gz, gy, gx = torch.meshgrid(z_mm, y_mm, x_mm, indexing="ij")  # each (D,H,W)
-
-    def _com(img: Tensor) -> Tensor:
-        w = img.clamp(min=0)  # guard against small negatives
-        tot = w.sum().clamp(min=1e-12)
-        cz = (w * gz).sum() / tot
-        cy = (w * gy).sum() / tot
-        cx = (w * gx).sum() / tot
-        return torch.stack([cz, cy, cx])
-
-    t_init = _com(fixed) - _com(moving)
-    return torch.cat([t_init, torch.zeros(3, device=device, dtype=dtype)])
-
-
 def register(
-    fixed: Tensor,
-    moving: Tensor,
-    voxel_size: Tuple[float, float, float],
+    fixed: ImageLike,
+    moving: ImageLike,
+    voxel_size: VoxelSize,
     cost_fn: Callable[[Tensor, Tensor], Tensor] = ncc,
     *,
-    init_params: Tensor | None = None,
+    init_params: ParamsLike | None = None,
     n_steps: int = 25,
     max_iter: int = 20,
     history_size: int = 10,
     tol: float = 1e-8,
     verbose: bool = True,
-) -> Tensor:
+) -> Params:
     """
     Single-scale rigid registration using L-BFGS.
 
     Args:
-        fixed:       (D, H, W) reference image.
-        moving:      (D, H, W) image to align to fixed.
-        voxel_size:  (vz, vy, vx) in mm.
+        fixed:       (D, H, W) reference image (tensor or numpy array).
+        moving:      (D, H, W) image to align to fixed (tensor or numpy array).
+                     When numpy arrays are given the device is chosen
+                     automatically (CUDA if available, otherwise CPU).
+                     When tensors are given their device is used as-is.
+        voxel_size:  (vz, vy, vx) in mm — tuple or numpy array.
         cost_fn:     metric(fixed, warped) → scalar.  Both args are (D, H, W).
-                     Example: lambda f, w: ((f - w) ** 2).sum()
-        init_params: (6,) initial guess. Defaults to zeros.
+        init_params: length-6 initial guess (tuple, numpy array, or tensor).
+                     Defaults to zeros.
         n_steps:     L-BFGS outer iterations.
         max_iter:    max line-search steps per outer iteration.
         history_size: L-BFGS curvature-pair history.
@@ -305,16 +295,20 @@ def register(
         verbose:     print loss each step.
 
     Returns:
-        params (6,) on the same device as fixed.
+        params as a tuple of 6 floats (tz, ty, tx, ωz, ωy, ωx).
         Call warp(moving, params, voxel_size) to obtain the aligned image.
     """
-    shape = tuple(fixed.shape)
-    device, dtype = fixed.device, fixed.dtype
-    moving5d = moving[None, None]
+    device = _image_device(fixed)
+    f = _to_float_tensor(fixed, device)
+    m = _to_float_tensor(moving, device)
+    dtype = f.dtype
+    vox = tuple(float(v) for v in voxel_size)
+    shape = tuple(f.shape)
+    moving5d = m[None, None]
 
     def _warp_moving(p: Tensor) -> Tensor:
         R = _rotvec_to_matrix(p[3:])
-        grid = _make_sampling_grid(R, p[:3], shape, voxel_size, shape, voxel_size)
+        grid = _make_sampling_grid(R, p[:3], shape, vox, shape, vox)
         return TF.grid_sample(
             moving5d,
             grid,
@@ -323,11 +317,12 @@ def register(
             align_corners=True,
         )[0, 0]
 
-    params = (
-        init_params.clone().detach().to(device=device, dtype=dtype)
-        if init_params is not None
-        else torch.zeros(6, device=device, dtype=dtype)
-    ).requires_grad_(True)
+    if init_params is not None:
+        p0 = _params_to_tensor(init_params, device, dtype)
+    else:
+        p0 = torch.zeros(6, device=device, dtype=dtype)
+
+    params = p0.clone().detach().requires_grad_(True)
 
     optimizer = torch.optim.LBFGS(
         [params],
@@ -342,7 +337,7 @@ def register(
 
         def closure():
             optimizer.zero_grad()
-            loss = cost_fn(fixed, _warp_moving(params))
+            loss = cost_fn(f, _warp_moving(params))
             loss.backward()
             return loss
 
@@ -358,9 +353,11 @@ def register(
             break
         loss_prev = loss_now
 
+    result = _tensor_to_params(params)
     if verbose:
         print(
-            f"    final parameters: t = [{params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f}] mm, rot = [{params[3]:.4f}, {params[4]:.4f}, {params[5]:.4f}] rad"
+            f"    final parameters: t = [{result[0]:.2f}, {result[1]:.2f}, {result[2]:.2f}] mm,"
+            f" rot = [{result[3]:.4f}, {result[4]:.4f}, {result[5]:.4f}] rad"
         )
 
-    return params.detach()
+    return result
