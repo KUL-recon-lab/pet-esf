@@ -266,7 +266,7 @@ def register(
     fixed: ImageLike,
     moving: ImageLike,
     voxel_size: VoxelSize,
-    cost_fn: Callable[[Tensor, Tensor], Tensor] = ncc,
+    cost_fn: Callable[[Tensor, Tensor], Tensor],
     *,
     init_params: ParamsLike | None = None,
     n_steps: int = 25,

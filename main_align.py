@@ -8,18 +8,22 @@ Device selection (CPU / CUDA) is handled automatically inside register/warp.
 
 import numpy as np
 from utils_align import register, warp
+from metrics import ncc, nmi
 
 # ── 1.  Load volumes ──────────────────────────────────────────────────────────
 
-F_np = np.load("data/mask.npy")  # fixed image (reference),  shape (D, H, W)
-M_np = np.load("data/pet.npy")  # moving image (to align),  shape (D, H, W)
+F_np = np.load("data/mask.npy")
+M_np = np.load("data/pet.npy")
 voxel_size = tuple(np.load("data/voxsize.npy"))  # (vz, vy, vx) in mm
 
 # ── 2.  Register ──────────────────────────────────────────────────────────────
 # register accepts numpy arrays directly and picks CUDA if available.
 # Returns a tuple of 6 floats: (tz, ty, tx, ωz, ωy, ωx).
 
-p_found = register(F_np, M_np, voxel_size)
+# cost = ncc
+cost = nmi(n_samples=np.prod(F_np.shape) // 10, sigma_ratio=0.5)
+
+p_found = register(F_np, M_np, voxel_size, cost)
 
 # ── 3.  Apply transform and evaluate ─────────────────────────────────────────
 
