@@ -91,16 +91,6 @@ def _tensor_to_params(t: Tensor) -> Params:
     return (v[0], v[1], v[2], v[3], v[4], v[5])
 
 
-def ssd(fixed: Tensor, warped: Tensor) -> Tensor:
-    return ((fixed - warped) ** 2).sum()
-
-
-def ncc(fixed: Tensor, warped: Tensor) -> Tensor:  # normalised cross-correlation
-    f = fixed - fixed.mean()
-    w = warped - warped.mean()
-    return -(f * w).sum() / (f.norm() * w.norm() + 1e-8)
-
-
 # ── Internal: rotation ────────────────────────────────────────────────────────
 
 
@@ -164,42 +154,6 @@ def _make_sampling_grid(
     return n_xyz.unsqueeze(0)  # (1, Nz, Ny, Nx, 3)
 
 
-# ── Internal: Gaussian smoothing ──────────────────────────────────────────────
-
-
-def _gaussian_kernel_1d(sigma: float, device, dtype) -> Tensor:
-    """1-D Gaussian kernel, truncated at ±3σ."""
-    radius = max(1, int(3.0 * sigma + 0.5))
-    x = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
-    k = torch.exp(-0.5 * (x / sigma) ** 2)
-    return k / k.sum()
-
-
-def _smooth3d(vol5d: Tensor, sigmas: Tuple[float, float, float]) -> Tensor:
-    """
-    Separable 3D Gaussian smoothing of a (1, 1, D, H, W) tensor.
-    sigmas = (σz, σy, σx) in voxels. Axes with σ < 0.5 are skipped.
-    Uses replicate padding to avoid border artefacts.
-    """
-    out = vol5d
-    for ax, sigma in enumerate(sigmas):
-        if sigma < 0.5:
-            continue
-        k = _gaussian_kernel_1d(sigma, vol5d.device, vol5d.dtype)
-        r = len(k) // 2
-        # kernel shape: (1,1,k,1,1) for ax=0 (D), (1,1,1,k,1) for ax=1 (H), …
-        kshape = [1, 1, 1, 1, 1]
-        kshape[2 + ax] = len(k)
-        k5d = k.view(kshape)
-        # F.pad order (innermost dim first): W, H, D → axis 2 maps to pad index 2*(2-ax)
-        pad = [0] * 6
-        pad_idx = 2 * (2 - ax)
-        pad[pad_idx] = r
-        pad[pad_idx + 1] = r
-        out = TF.conv3d(TF.pad(out, pad, mode="replicate"), k5d)
-    return out
-
-
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
@@ -228,7 +182,7 @@ def warp(
     voxel_size: VoxelSize,
     *,
     padding_mode: str = "border",
-) -> Tensor:
+) -> Tensor | np.ndarray:
     """
     Apply a rigid transform to a 3D image.
 
@@ -242,8 +196,10 @@ def warp(
         padding_mode: 'border' | 'zeros' | 'reflection'.
 
     Returns:
-        Warped image (D, H, W) tensor on the same device as *image*.
+        Warped image (D, H, W). Returns a numpy array if *image* was a numpy
+        array, otherwise a tensor on the same device as *image*.
     """
+    return_numpy = isinstance(image, np.ndarray)
     device = _image_device(image)
     img = _to_float_tensor(image, device)
     p = _params_to_tensor(params, device, img.dtype)
@@ -259,7 +215,10 @@ def warp(
         padding_mode=padding_mode,
         align_corners=True,
     )
-    return out[0, 0]
+    result = out[0, 0]
+    if return_numpy:
+        return result.cpu().numpy()
+    return result
 
 
 def register(
@@ -361,3 +320,32 @@ def register(
         )
 
     return result
+
+
+def transform_plane(
+    n: np.ndarray,  # (3,) normal vector in source space
+    d: float,  # signed distance from the physical origin
+    params: tuple[float, ...],  # 6 floats (tz, ty, tx, ωz, ωy, ωx)
+) -> tuple[np.ndarray, float]:
+    """
+    Transform a plane  x·n = d  by the rigid transform T(x) = R @ x + t.
+
+    Args:
+        n:      (3,) normal vector (need not be unit length).
+        d:      Signed distance from the physical origin.
+        params: (tz, ty, tx, ωz, ωy, ωx) — same convention as warp().
+
+    Returns:
+        (n', d') defining the transformed plane  p·n' = d'.
+        n' has the same norm as n.
+
+    To go the other way (inverse transform) pass invert_params(params).
+    """
+    p = torch.tensor(params, dtype=torch.float64)
+    R = _rotvec_to_matrix(p[3:])
+    t = p[:3]
+
+    n_ = R @ torch.tensor(n, dtype=torch.float64)
+    d_ = torch.tensor(d, dtype=torch.float64) + n_ @ t
+
+    return n_.numpy(), float(d_)

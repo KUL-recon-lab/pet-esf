@@ -6,19 +6,21 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.interpolate import make_smoothing_spline, InterpolatedUnivariateSpline
-from scipy.ndimage import find_objects, center_of_mass, gaussian_filter
+from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 import pymirc.viewer as pv
 import pymirc.image_operations as pymi
 
 from utils import rebin_xy
+from utils_align import register, warp, invert_params, transform_plane
+from metrics import ncc
 
 # %%
 # input parameters
 parser = argparse.ArgumentParser()
 parser.add_argument("fname", type=Path, help="path to the NIfTI file")
 parser.add_argument(
-    "--nbins", type=int, default=256, help="number of bins for rebinning"
+    "--nbins", type=int, default=128, help="number of bins for rebinning"
 )
 parser.add_argument(
     "--cube_diam_mm", type=float, default=14.96, help="cube diameter in mm"
@@ -27,13 +29,13 @@ parser.add_argument(
     "--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)"
 )
 parser.add_argument(
-    "--r1", type=float, default=10.0, help="outer ROI radius in mm along edge direction"
+    "--r1", type=float, default=7.0, help="outer ROI radius in mm along edge direction"
 )
 parser.add_argument(
-    "--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge"
+    "--r2", type=float, default=2.5, help="inner ROI radius in mm perpendicular to edge"
 )
 parser.add_argument(
-    "--lam", type=float, default=0.5, help="smoothing spline regularization parameter"
+    "--lam", type=float, default=0.2, help="smoothing spline regularization parameter"
 )
 parser.add_argument(
     "--interp_z",
@@ -208,24 +210,19 @@ end = end_mm / voxsize + center
 # %%
 # rigidly coregister the pet to the reference image
 
-coreg_file = fname.parent / (fname.stem + "_coreg.txt")
+coreg_params = register(mask, pet, voxsize, ncc)
+pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
 
-if coreg_file.exists():
-    coreg_aff = np.loadtxt(coreg_file)
-else:
-    _, coreg_aff, coreg_params = pymi.rigid_registration(
-        pet,
-        mask,
-        nii.affine,
-        nii.affine,
-        metric=lambda x, y: np.sum((x - y) ** 2),
-        opts=dict(ftol=1e-4, xtol=1e-4, maxiter=1000, disp=False),
-    )
+inv_coreg_params = invert_params(coreg_params)
+mask_coreg = warp(mask, inv_coreg_params, voxsize)
 
-    np.savetxt(coreg_file, coreg_aff)
+# define a plane using a normal vector n and a distance
+# this definition is in the "aligned / straigtened" space
+n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
+d_coreg = -end_mm[0]  # distance from origin to the plane along the normal vector
 
-pet_coreg = pymi.aff_transform(pet, coreg_aff, pet.shape)
-mask_coreg = pymi.aff_transform(mask, np.linalg.inv(coreg_aff), pet.shape)
+# transform the plane parameters to the original space
+n, d = transform_plane(n_coreg, d_coreg, coreg_params)
 
 ################################################################################
 # %%
@@ -291,19 +288,16 @@ end_y = min(pet.shape[1], end_y)
 end_z = min(pet.shape[2], end_z)
 
 roi_img[start_x:end_x, start_y:end_y, start_z:end_z] = 1
+roi_img_coreg = warp(roi_img, inv_coreg_params, voxsize)
+
 ################################################################################
 # %%
 # calculate the distance from the edge
 
-# transform plane origin and normal vector to the tilted space
-p = (coreg_aff @ np.array([ps[0], ps[1], ps[2], 1]))[:3]
-n = coreg_aff[:3, :3] @ ns
-
-
-# setup X,Y,Z coordinates in voxel space
-x = np.arange(pet.shape[0])
-y = np.arange(pet.shape[1])
-z = np.arange(pet.shape[2])
+# setup X,Y,Z coordinates in world coordinates, such that the center voxel is at (0m, 0m, 0m)
+x = (np.arange(pet.shape[0]) - center[0]) * voxsize[0]
+y = (np.arange(pet.shape[1]) - center[1]) * voxsize[1]
+z = (np.arange(pet.shape[2]) - center[2]) * voxsize[2]
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
 
@@ -311,22 +305,14 @@ X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 # Plane equation: n · (point - p) = 0, or equivalently n · point - n · p = 0
 # Distance from point to plane: (x-p) dot n / ||n||, our n is already normalized
 
-signed_distance = (
-    (X - p[0]) * n[0] * voxsize[0]
-    + (Y - p[1]) * n[1] * voxsize[1]
-    + (Z - p[2]) * n[2] * voxsize[2]
-)
+signed_distance = X * n[0] + Y * n[1] + Z * n[2] - d
 
 ################################################################################
 # %%
 
-# transform the roi_img to the tilted space
-roi_img_coreg = pymi.aff_transform(
-    roi_img, np.linalg.inv(coreg_aff), roi_img.shape
-).astype(bool)
-
-sd = signed_distance[roi_img_coreg].ravel()
-signal = pet[roi_img_coreg].ravel()
+inds = np.where(roi_img_coreg > 0.5)
+sd = signed_distance[inds].ravel()
+signal = pet[inds].ravel()
 
 ################################################################################
 # %%
