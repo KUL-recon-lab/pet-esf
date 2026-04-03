@@ -23,13 +23,14 @@ parser.add_argument(
     "--nbins", type=int, default=128, help="number of bins for rebinning"
 )
 parser.add_argument(
-    "--cube_diam_mm", type=float, default=14.96, help="cube diameter in mm"
+    "--edge",
+    type=str,
+    default="xs",
+    help="edge direction",
+    choices=["xs", "xe", "ys", "ye", "zs", "ze"],
 )
 parser.add_argument(
-    "--edge", type=str, default="xs", help="edge direction (xs, xl, ys, yl, zs, zl)"
-)
-parser.add_argument(
-    "--r1", type=float, default=7.0, help="outer ROI radius in mm along edge direction"
+    "--r1", type=float, default=8.0, help="outer ROI radius in mm along edge direction"
 )
 parser.add_argument(
     "--r2", type=float, default=2.5, help="inner ROI radius in mm perpendicular to edge"
@@ -60,7 +61,6 @@ args = parser.parse_args()
 fname: Path = args.fname
 data_dir: Path = fname.parent
 nbins: int = args.nbins
-cube_diam_mm: float = args.cube_diam_mm
 edge: str = args.edge
 r1: float = args.r1
 r2: float = args.r2
@@ -216,13 +216,6 @@ pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
 inv_coreg_params = invert_params(coreg_params)
 mask_coreg = warp(mask, inv_coreg_params, voxsize)
 
-# define a plane using a normal vector n and a distance
-# this definition is in the "aligned / straigtened" space
-n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
-d_coreg = -end_mm[0]  # distance from origin to the plane along the normal vector
-
-# transform the plane parameters to the original space
-n, d = transform_plane(n_coreg, d_coreg, coreg_params)
 
 ################################################################################
 # %%
@@ -233,13 +226,15 @@ if edge.startswith("x"):
     if edge == "xs":
         start_x = int(start[0] - r1 / voxsize[0])
         end_x = int(start[0] + r1 / voxsize[0])
-        ps = np.array([start[0], (end[1] + start[1]) // 2, (end[2] + start[2]) // 2])
-        ns = np.array([1, 0, 0])
-    else:
+        n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
+        d_coreg = start_mm[0]
+    elif edge == "xe":
         start_x = int(end[0] - r1 / voxsize[0])
         end_x = int(end[0] + r1 / voxsize[0])
-        ps = np.array([end[0], (end[1] + start[1]) // 2, (end[2] + start[2]) // 2])
-        ns = np.array([-1, 0, 0])
+        n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
+        d_coreg = -end_mm[0]
+    else:
+        raise NotImplementedError("invalid edge mode")
 
     start_y = int(0.5 * (start[1] + end[1]) - r2 / voxsize[1])
     end_y = int(0.5 * (start[1] + end[1]) + r2 / voxsize[1])
@@ -249,13 +244,15 @@ elif edge.startswith("y"):
     if edge == "ys":
         start_y = int(start[1] - r1 / voxsize[1])
         end_y = int(start[1] + r1 / voxsize[1])
-        ps = np.array([(end[0] + start[0]) // 2, start[1], (end[2] + start[2]) // 2])
-        ns = np.array([0, 1, 0])
-    else:
+        n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
+        d_coreg = start_mm[1]
+    elif edge == "ye":
         start_y = int(end[1] - r1 / voxsize[1])
         end_y = int(end[1] + r1 / voxsize[1])
-        ps = np.array([(end[0] + start[0]) // 2, end[1], (end[2] + start[2]) // 2])
-        ns = np.array([0, -1, 0])
+        n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
+        d_coreg = -end_mm[1]
+    else:
+        raise NotImplementedError("invalid edge mode")
 
     start_x = int(0.5 * (start[0] + end[0]) - r2 / voxsize[0])
     end_x = int(0.5 * (start[0] + end[0]) + r2 / voxsize[0])
@@ -265,13 +262,15 @@ elif edge.startswith("z"):
     if edge == "zs":
         start_z = int(start[2] - r1 / voxsize[2])
         end_z = int(start[2] + r1 / voxsize[2])
-        ps = np.array([(end[0] + start[0]) // 2, (end[1] + start[1]) // 2, start[2]])
-        ns = np.array([0, 0, 1])
-    else:
+        n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
+        d_coreg = start_mm[2]
+    elif edge == "ze":
         start_z = int(end[2] - 6 / voxsize[2])
         end_z = int(end[2] + 6 / voxsize[2])
-        ps = np.array([(end[0] + start[0]) // 2, (end[1] + start[1]) // 2, end[2]])
-        ns = np.array([0, 0, -1])
+        n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
+        d_coreg = -end_mm[2]
+    else:
+        raise NotImplementedError("invalid edge mode")
 
     start_x = int(0.5 * (start[0] + end[0]) - r2 / voxsize[0])
     end_x = int(0.5 * (start[0] + end[0]) + r2 / voxsize[0])
@@ -293,6 +292,9 @@ roi_img_coreg = warp(roi_img, inv_coreg_params, voxsize)
 ################################################################################
 # %%
 # calculate the distance from the edge
+
+# transform the plane parameters to the original space
+n, d = transform_plane(n_coreg, d_coreg, coreg_params)
 
 # setup X,Y,Z coordinates in world coordinates, such that the center voxel is at (0m, 0m, 0m)
 x = (np.arange(pet.shape[0]) - center[0]) * voxsize[0]
