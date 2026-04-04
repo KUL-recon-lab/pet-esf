@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
-from scipy.interpolate import make_smoothing_spline, InterpolatedUnivariateSpline
+from scipy.interpolate import make_smoothing_spline
 from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 import pymirc.viewer as pv
@@ -14,6 +14,17 @@ import pymirc.image_operations as pymi
 from utils import rebin_xy
 from utils_align import register, warp, invert_params, transform_plane
 from metrics import ncc
+
+
+def find_roots(x, y):
+    signs = np.sign(y)
+    crossings = np.where(np.diff(signs) != 0)[0]  # indices where sign changes
+    roots = []
+    for i in crossings:
+        # linear interpolation between x[i] and x[i+1]
+        roots.append(x[i] - y[i] * (x[i + 1] - x[i]) / (y[i + 1] - y[i]))
+    return np.array(roots)
+
 
 # %%
 # input parameters
@@ -225,75 +236,35 @@ mask_coreg = warp(mask, inv_coreg_params, voxsize)
 
 ################################################################################
 # %%
-# create a ROI image indicating the region of interest used for LSF
-# roi_img = np.zeros_like(pet)
-
 if edge.startswith("x"):
     if edge == "xs":
-        # start_x = int(start[0] - r1 / voxsize[0])
-        # end_x = int(start[0] + r1 / voxsize[0])
         n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
         p_coreg = np.asarray([start_mm[0], 0, 0])
     elif edge == "xe":
-        # start_x = int(end[0] - r1 / voxsize[0])
-        # end_x = int(end[0] + r1 / voxsize[0])
         n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
         p_coreg = np.asarray([end_mm[0], 0, 0])
     else:
         raise NotImplementedError("invalid edge mode")
-
-    # start_y = int(0.5 * (start[1] + end[1]) - r2 / voxsize[1])
-    # end_y = int(0.5 * (start[1] + end[1]) + r2 / voxsize[1])
-    # start_z = int(0.5 * (start[2] + end[2]) - r2 / voxsize[2])
-    # end_z = int(0.5 * (start[2] + end[2]) + r2 / voxsize[2])
 elif edge.startswith("y"):
     if edge == "ys":
-        # start_y = int(start[1] - r1 / voxsize[1])
-        # end_y = int(start[1] + r1 / voxsize[1])
         n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
         p_coreg = np.asarray([0, start_mm[1], 0])
     elif edge == "ye":
-        # start_y = int(end[1] - r1 / voxsize[1])
-        # end_y = int(end[1] + r1 / voxsize[1])
         n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
         p_coreg = np.asarray([0, end_mm[1], 0])
     else:
         raise NotImplementedError("invalid edge mode")
-
-    # start_x = int(0.5 * (start[0] + end[0]) - r2 / voxsize[0])
-    # end_x = int(0.5 * (start[0] + end[0]) + r2 / voxsize[0])
-    # start_z = int(0.5 * (start[2] + end[2]) - r2 / voxsize[2])
-    # end_z = int(0.5 * (start[2] + end[2]) + r2 / voxsize[2])
 elif edge.startswith("z"):
     if edge == "zs":
-        # start_z = int(start[2] - r1 / voxsize[2])
-        # end_z = int(start[2] + r1 / voxsize[2])
         n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
         p_coreg = np.asarray([0, 0, start_mm[2]])
     elif edge == "ze":
-        # start_z = int(end[2] - 6 / voxsize[2])
-        # end_z = int(end[2] + 6 / voxsize[2])
         n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
         p_coreg = np.asarray([0, 0, end_mm[2]])
     else:
         raise NotImplementedError("invalid edge mode")
-
-    # start_x = int(0.5 * (start[0] + end[0]) - r2 / voxsize[0])
-    # end_x = int(0.5 * (start[0] + end[0]) + r2 / voxsize[0])
-    # start_y = int(0.5 * (start[1] + end[1]) - r2 / voxsize[1])
-    # end_y = int(0.5 * (start[1] + end[1]) + r2 / voxsize[1])
 else:
     raise NotImplementedError("invalid edge mode")
-
-# start_x = max(0, start_x)
-# start_y = max(0, start_y)
-# start_z = max(0, start_z)
-# end_x = min(pet.shape[0], end_x)
-# end_y = min(pet.shape[1], end_y)
-# end_z = min(pet.shape[2], end_z)
-#
-# roi_img[start_x:end_x, start_y:end_y, start_z:end_z] = 1
-# roi_img_coreg = warp(roi_img, inv_coreg_params, voxsize)
 
 ################################################################################
 # %%
@@ -310,93 +281,84 @@ y = (np.arange(pet.shape[1]) - center[1]) * voxsize[1]
 z = (np.arange(pet.shape[2]) - center[2]) * voxsize[2]
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
-# get the perpendicular components by subtracting the parallel components from the original coordinates
-V = np.stack([X, Y, Z], axis=-1) - p  # (D, H, W, 3)
-signed_distance = V @ n  # (D, H, W)
-perp_dist = np.linalg.norm(V - signed_distance[..., None] * n, axis=-1)  # (D, H, W)
+# get the signed distance of all voxels from the plane
+V = np.stack([X, Y, Z], axis=-1) - p
+signed_plane_dist = V @ n
+# calculate the perpendicular distance to ray formed by plane origin and normal vector
+perp_dist = np.linalg.norm(V - signed_plane_dist[..., None] * n, axis=-1)
 
-# Calculate distance from all points to the plane
-# Plane equation: n · (point - p) = 0, or equivalently n · point - n · p = 0
-# Distance from point to plane: (x-p) dot n / ||n||, our n is already normalized
+roi_mask = (np.abs(signed_plane_dist) <= r1) * (perp_dist <= r2)
 
-# d = n[0] * p[0] + n[1] * p[1] + n[2] * p[2]
-# signed_distance = X * n[0] + Y * n[1] + Z * n[2] - d
+sd = signed_plane_dist[roi_mask].ravel()
+signal = pet[roi_mask].ravel()
 
 #################################################################################
-## %%
-#
-# inds = np.where(roi_img_coreg > 0.5)
-# sd = signed_distance[inds].ravel()
-# signal = pet[inds].ravel()
-#
-#################################################################################
-## %%
-## fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
-#
-# inds = np.argsort(sd)
-# sd = sd[inds]
-# signal = signal[inds]
-# signal /= signal[np.argmax(sd)]
-#
-# sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
-#
-## spline = make_smoothing_spline(sd, signal, lam=15.0)
-# spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
-#
-# ss = np.linspace(sd.min(), sd.max(), 1000)
-#
-# esf = spline(ss)
-# lsf = spline.derivative(1)(ss)
-# nlsf = lsf / lsf.max()
-#
-# contrast = esf[-1] / esf[0]
-#
-# roots_half = InterpolatedUnivariateSpline(ss, lsf - 0.5 * lsf.max()).roots()
-# fwhm = roots_half[-1] - roots_half[0]
-#
-# roots_tenth = InterpolatedUnivariateSpline(ss, lsf - 0.1 * lsf.max()).roots()
-# fwtm = roots_tenth[-1] - roots_tenth[0]
-#
-# print(
-#    f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
-# )
-#
-#################################################################################
-## %%
-## visualize the results
-#
-# fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
-# ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
-# ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
-# ax[0].plot(ss, esf, "-", color="C1")
-# ax[0].set_ylim(-0.05, 1.05 * esf.max())
-# ax[1].plot(ss, nlsf, "-")
-#
-## indicate FWHM in normalized coordinates (0 to 1)
-# xmin_ax, xmax_ax = ax[1].get_xlim()
-# ax[1].axhline(
-#    0.5,
-#    color="gray",
-#    ls="--",
-#    xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
-#    xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
-# )
-# ax[1].axhline(
-#    0.1,
-#    color="gray",
-#    ls="--",
-#    xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
-#    xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
-# )
-#
-# for axx in ax:
-#    axx.grid(ls=":")
-#    axx.set_xlabel("Distance from edge (mm)")
-#
-# ax[0].set_title("ESF", fontsize="medium")
-# ax[1].set_title("normalized LSF", fontsize="medium")
-#
-# fig.show()
+# %%
+# fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
+
+inds = np.argsort(sd)
+sd = sd[inds]
+signal = signal[inds]
+signal /= signal[np.argmax(sd)]
+
+sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
+
+spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
+
+ss = np.linspace(sd.min(), sd.max(), 1000)
+
+esf = spline(ss)
+lsf = spline.derivative(1)(ss)
+nlsf = lsf / lsf.max()
+
+contrast = esf[-1] / esf[0]
+
+roots_half = find_roots(ss, nlsf - 0.5)
+fwhm = roots_half[1] - roots_half[0]
+
+roots_tenth = find_roots(ss, nlsf - 0.1)
+fwtm = roots_tenth[1] - roots_tenth[0]
+
+print(
+    f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
+)
+
+################################################################################
+# %%
+# visualize the results
+
+fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
+ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
+ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
+ax[0].plot(ss, esf, "-", color="C1")
+ax[0].set_ylim(-0.05, 1.05 * esf.max())
+ax[1].plot(ss, nlsf, "-")
+
+# indicate FWHM in normalized coordinates (0 to 1)
+xmin_ax, xmax_ax = ax[1].get_xlim()
+ax[1].axhline(
+    0.5,
+    color="gray",
+    ls="--",
+    xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
+)
+ax[1].axhline(
+    0.1,
+    color="gray",
+    ls="--",
+    xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
+    xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
+)
+
+for axx in ax:
+    axx.grid(ls=":")
+    axx.set_xlabel("Distance from edge (mm)")
+
+ax[0].set_title("ESF", fontsize="medium")
+ax[1].set_title("normalized LSF", fontsize="medium")
+
+fig.show()
 #
 ## show the aligned images with the ROI
 ## the viewer expects the images in LPS orientation, so we flip the images accordingly
