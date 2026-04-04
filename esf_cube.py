@@ -233,12 +233,12 @@ if edge.startswith("x"):
         # start_x = int(start[0] - r1 / voxsize[0])
         # end_x = int(start[0] + r1 / voxsize[0])
         n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
-        d_coreg = start_mm[0]
+        p_coreg = np.asarray([start_mm[0], 0, 0])
     elif edge == "xe":
         # start_x = int(end[0] - r1 / voxsize[0])
         # end_x = int(end[0] + r1 / voxsize[0])
         n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
-        d_coreg = -end_mm[0]
+        p_coreg = np.asarray([end_mm[0], 0, 0])
     else:
         raise NotImplementedError("invalid edge mode")
 
@@ -251,12 +251,12 @@ elif edge.startswith("y"):
         # start_y = int(start[1] - r1 / voxsize[1])
         # end_y = int(start[1] + r1 / voxsize[1])
         n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
-        d_coreg = start_mm[1]
+        p_coreg = np.asarray([0, start_mm[1], 0])
     elif edge == "ye":
         # start_y = int(end[1] - r1 / voxsize[1])
         # end_y = int(end[1] + r1 / voxsize[1])
         n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
-        d_coreg = -end_mm[1]
+        p_coreg = np.asarray([0, end_mm[1], 0])
     else:
         raise NotImplementedError("invalid edge mode")
 
@@ -269,12 +269,12 @@ elif edge.startswith("z"):
         # start_z = int(start[2] - r1 / voxsize[2])
         # end_z = int(start[2] + r1 / voxsize[2])
         n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
-        d_coreg = start_mm[2]
+        p_coreg = np.asarray([0, 0, start_mm[2]])
     elif edge == "ze":
         # start_z = int(end[2] - 6 / voxsize[2])
         # end_z = int(end[2] + 6 / voxsize[2])
         n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
-        d_coreg = -end_mm[2]
+        p_coreg = np.asarray([0, 0, end_mm[2]])
     else:
         raise NotImplementedError("invalid edge mode")
 
@@ -299,23 +299,28 @@ else:
 # %%
 # calculate the distance from the edge
 
-# transform the plane parameters to the original space
-n, d = transform_plane(n_coreg, d_coreg, coreg_params)
+# transform the plane parameters (normal vector and in plane point) to the original space
+p, n = transform_plane(p_coreg, n_coreg, coreg_params)
 
 center = np.array(pet.shape) / 2 - 0.5
 
-# setup X,Y,Z coordinates in world coordinates, such that the center at (0m, 0m, 0m)
+# setup X,Y,Z coordinates in world coordinates, such that the in plane point it as (0, 0, 0)mm
 x = (np.arange(pet.shape[0]) - center[0]) * voxsize[0]
 y = (np.arange(pet.shape[1]) - center[1]) * voxsize[1]
 z = (np.arange(pet.shape[2]) - center[2]) * voxsize[2]
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
+# get the perpendicular components by subtracting the parallel components from the original coordinates
+V = np.stack([X, Y, Z], axis=-1) - p  # (D, H, W, 3)
+signed_distance = V @ n  # (D, H, W)
+perp_dist = np.linalg.norm(V - signed_distance[..., None] * n, axis=-1)  # (D, H, W)
 
 # Calculate distance from all points to the plane
 # Plane equation: n · (point - p) = 0, or equivalently n · point - n · p = 0
 # Distance from point to plane: (x-p) dot n / ||n||, our n is already normalized
 
-signed_distance = X * n[0] + Y * n[1] + Z * n[2] - d
+# d = n[0] * p[0] + n[1] * p[1] + n[2] * p[2]
+# signed_distance = X * n[0] + Y * n[1] + Z * n[2] - d
 
 #################################################################################
 ## %%

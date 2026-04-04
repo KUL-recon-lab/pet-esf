@@ -323,29 +323,30 @@ def register(
 
 
 def transform_plane(
-    n: np.ndarray,  # (3,) normal vector in source space
-    d: float,  # signed distance from the physical origin
+    p: np.ndarray,  # (3,) any point on the plane
+    n: np.ndarray,  # (3,) normal vector
     params: tuple[float, ...],  # 6 floats (tz, ty, tx, ωz, ωy, ωx)
-) -> tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Transform a plane  x·n = d  by the rigid transform T(x) = R @ x + t.
+    Transform a plane defined by in-plane point p and normal n.
 
     Args:
+        p:      (3,) any point lying on the plane, in physical mm.
         n:      (3,) normal vector (need not be unit length).
-        d:      Signed distance from the physical origin.
         params: (tz, ty, tx, ωz, ωy, ωx) — same convention as warp().
 
     Returns:
-        (n', d') defining the transformed plane  p·n' = d'.
-        n' has the same norm as n.
+        (p', n') where p' is the transformed in-plane point
+        and n' is the transformed normal.
+        ‖n'‖ = ‖n‖ (norm is preserved).
 
-    To go the other way (inverse transform) pass invert_params(params).
+    To go the other way pass invert_params(params).
     """
-    p = torch.tensor(params, dtype=torch.float64)
-    R = _rotvec_to_matrix(p[3:])
-    t = p[:3]
+    par = torch.tensor(params, dtype=torch.float64)
+    R = _rotvec_to_matrix(par[3:])
+    t = par[:3]
 
-    n_ = R @ torch.tensor(n, dtype=torch.float64)
-    d_ = torch.tensor(d, dtype=torch.float64) + n_ @ t
+    p_ = R @ torch.tensor(p, dtype=torch.float64) + t  # point: rotate + translate
+    n_ = R @ torch.tensor(n, dtype=torch.float64)  # vector: rotate only
 
-    return n_.numpy(), float(d_)
+    return p_.numpy(), n_.numpy()
