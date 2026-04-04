@@ -11,7 +11,7 @@ from scipy.signal import find_peaks
 import pymirc.viewer as pv
 import pymirc.image_operations as pymi
 
-from utils import rebin_xy
+from utils import rebin_xy, make_two_cubes
 from utils_align import register, warp, invert_params, transform_plane
 from metrics import ncc
 
@@ -174,64 +174,24 @@ offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
 start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
 end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
 
-mask = np.load("mask.npy")
-
-## %%
-## center of the mass of the image in voxel coordinates
-## center = np.array(center_of_mass(pet)).astype(int)
-# center = np.array(pet.shape) // 2
-## world coordinates, such that center voxel is at (0m, 0m, 0m)
-## to go from voxel index to world coordinate: world = (index - center) * voxsize
-## to go from world coordinate to voxel index: index = world / voxsize + center
-#
-## this is the diameter of a the single "filled" cube
-# inner_cube_diam_vox = np.round(inner_cube_diam_mm / voxsize).astype(int)
-## the center offset of the two cubes, before adding them (half the distance between the centers of the two cubes)
-# offset_vox = np.round(offset_mm / voxsize).astype(int)
-## offset_vox[0] *= -1
-#
-# mask1 = np.zeros_like(pet)
-# mask2 = np.zeros_like(pet)
-# mask = np.zeros_like(pet)
-#
-## first cube mask
-# c1 = center - offset_vox
-# c1_mm = center_mm - offset_mm
-#
-# start1 = c1 - inner_cube_diam_vox // 2
-# start1_mm = c1_mm - inner_cube_diam_mm / 2
-#
-# end1 = start1 + inner_cube_diam_vox
-# end1_mm = start1_mm + inner_cube_diam_mm
-#
-# mask1[start1[0] : end1[0], start1[1] : end1[1], start1[2] : end1[2]] += (
-#    1.0 * intensities[0]
-# )
-#
-## second cube mask
-# c2 = center + offset_vox
-# start2 = c2 - inner_cube_diam_vox // 2
-# end2 = start2 + inner_cube_diam_vox
-# mask2[start2[0] : end2[0], start2[1] : end2[1], start2[2] : end2[2]] += (
-#    1.0 * intensities[1]
-# )
-#
-# mask = mask1 + mask2
-#
-#
-## voxel coordinates of the start and end of the edge between the two cubes (float)
-# start = start_mm / voxsize + center
-# end = end_mm / voxsize + center
 
 ################################################################################
 # %%
 # rigidly coregister the pet to the reference image
 
-coreg_params = register(mask, pet, voxsize, ncc)
+ref_img = make_two_cubes(
+    inner_cube_diam_mm,
+    offset_scalar_mm,
+    pet.shape,
+    voxsize,
+    intensities[0],
+    intensities[1],
+)
+coreg_params = register(ref_img, pet, voxsize, ncc)
 pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
 
 inv_coreg_params = invert_params(coreg_params)
-mask_coreg = warp(mask, inv_coreg_params, voxsize)
+mask_coreg = warp(ref_img, inv_coreg_params, voxsize)
 
 
 ################################################################################
@@ -331,7 +291,7 @@ fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
 ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
 ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
 ax[0].plot(ss, esf, "-", color="C1")
-ax[0].set_ylim(-0.05, 1.05 * esf.max())
+# ax[0].set_ylim(-0.05, 1.05 * esf.max())
 ax[1].plot(ss, nlsf, "-")
 
 # indicate FWHM in normalized coordinates (0 to 1)
