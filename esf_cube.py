@@ -93,7 +93,9 @@ tilted_plane_vectors = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scal
 # %%
 # calculate the distance from the edge
 
-fig, ax = plt.subplots(2, 6, figsize=(18, 6), layout="constrained", sharex=True)
+roi_masks = dict()
+
+fig, ax = plt.subplots(3, 6, figsize=(18, 9), layout="constrained")
 
 for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     p, n = tilted_plane_vectors[edge]
@@ -104,6 +106,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     perp_dist = np.linalg.norm(Vp - signed_plane_dist[..., None] * n, axis=-1)
 
     roi_mask = (np.abs(signed_plane_dist) <= r1) * (perp_dist <= r2)
+    roi_masks[edge] = roi_mask
 
     sd = signed_plane_dist[roi_mask].ravel()
     signal = pet[slices][roi_mask].ravel()
@@ -115,11 +118,14 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     signal = signal[inds]
     signal /= signal[np.argmax(sd)]
 
-    sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
+    # sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
+    sd_binned = sd
+    signal_binned = signal
 
     spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
 
-    ss = np.linspace(sd.min(), sd.max(), 1000)
+    # ss, dss = np.linspace(sd.min(), sd.max(), 2056, retstep=True)
+    ss, dss = np.linspace(-r1, r1, 512, retstep=True, endpoint=False)
 
     esf = spline(ss)
     lsf = spline.derivative(1)(ss)
@@ -128,14 +134,29 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     contrast = esf[-1] / esf[0]
 
     roots_half = find_roots(ss, nlsf - 0.5)
+    if len(roots_half) < 2:
+        raise ValueError(f"Could not find two roots for half maximum for edge {edge}")
+    if len(roots_half) > 2:
+        # take the two roots that are closest to the center (0 mm)
+        roots_half = sorted(roots_half, key=lambda x: abs(x))[:2]
     fwhm = roots_half[1] - roots_half[0]
 
     roots_tenth = find_roots(ss, nlsf - 0.1)
+    if len(roots_tenth) < 2:
+        raise ValueError(f"Could not find two roots for tenth maximum for edge {edge}")
+    if len(roots_tenth) > 2:
+        # take the two roots that are closest to the center (0 mm)
+        roots_tenth = sorted(roots_tenth, key=lambda x: abs(x))[:2]
+
     fwtm = roots_tenth[1] - roots_tenth[0]
 
     print(
         f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
     )
+
+    spatial_freq = np.fft.fftshift(np.fft.fftfreq(len(ss), dss))
+    mtf = np.fft.fftshift(np.abs(np.fft.fft(nlsf)))
+    mtf /= mtf[mtf.size // 2]
 
     # %%
     # visualize the results
@@ -144,6 +165,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     ax[0, ie].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
     ax[0, ie].plot(ss, esf, "-", color="C1")
     ax[1, ie].plot(ss, nlsf, "-")
+    ax[2, ie].plot(spatial_freq, mtf, ".-")
 
     # indicate FWHM in normalized coordinates (0 to 1)
     xmin_ax, xmax_ax = ax[1, ie].get_xlim()
@@ -154,6 +176,14 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
         xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
         xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
     )
+    ax[1, ie].text(
+        0.5 * roots_half[1],
+        0.5,
+        f"FWHM: {fwhm:.2f} mm",
+        ha="left",
+        va="bottom",
+        fontsize="x-small",
+    )
     ax[1, ie].axhline(
         0.1,
         color="gray",
@@ -161,14 +191,27 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
         xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
         xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
     )
-    ax[0, ie].set_title(f"{edge}", fontsize="medium")
+    ax[1, ie].text(
+        0.5 * roots_tenth[1],
+        0.1,
+        f"FWTM: {fwtm:.2f} mm",
+        ha="left",
+        va="bottom",
+        fontsize="x-small",
+    )
+
+    ax[0, ie].set_title(f"{edge} contrast: {contrast:.1f}", fontsize="medium")
 
 ax[0, 0].set_ylabel(f"ESF", fontsize="medium")
 ax[1, 0].set_ylabel(f"norm. LSF", fontsize="medium")
+ax[2, 0].set_ylabel(f"norm. MTF", fontsize="medium")
 
 for axx in ax.ravel():
     axx.grid(ls=":")
 for axx in ax[1, :]:
-    axx.set_xlabel("Distance from edge (mm)")
+    axx.set_xlabel("distance (mm)")
+for axx in ax[2, :]:
+    axx.set_xlim(0, 0.5)
+    axx.set_xlabel("spatial freq. (1/mm)")
 
 fig.show()
