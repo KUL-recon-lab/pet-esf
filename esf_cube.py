@@ -44,24 +44,7 @@ parser.add_argument(
 parser.add_argument(
     "--lam", type=float, default=0.2, help="smoothing spline regularization parameter"
 )
-parser.add_argument(
-    "--interp_z",
-    action="store_true",
-    default=False,
-    help="interpolate by factor 2 in z after cropping (linear, half-voxel shift)",
-)
-parser.add_argument(
-    "--interp_x",
-    action="store_true",
-    default=False,
-    help="interpolate by factor 2 in x after cropping (linear, half-voxel shift)",
-)
-parser.add_argument(
-    "--interp_y",
-    action="store_true",
-    default=False,
-    help="interpolate by factor 2 in y after cropping (linear, half-voxel shift)",
-)
+
 args = parser.parse_args()
 
 fname: Path = args.fname
@@ -71,12 +54,9 @@ edge: str = args.edge
 r1: float = args.r1
 r2: float = args.r2
 lam: float = args.lam
-interp_z: bool = args.interp_z
-interp_x: bool = args.interp_x
-interp_y: bool = args.interp_y
 
-inner_cube_diam_mm = 29.2
-offset_scalar_mm = 6.6
+inner_cube_diam_mm = 29.3
+offset_scalar_mm = 6.45
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
