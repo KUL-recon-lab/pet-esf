@@ -80,15 +80,16 @@ interp_z: bool = args.interp_z
 interp_x: bool = args.interp_x
 interp_y: bool = args.interp_y
 
-inner_cube_diam_mm = 29.3
-offset_scalar_mm = 6.45
+inner_cube_diam_mm = 29.2
+offset_scalar_mm = 6.6
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
 
 nii = nib.as_closest_canonical(nib.load(fname))
-pet = nii.get_fdata()
+pet = nii.get_fdata().copy()
 voxsize = nii.header["pixdim"][1:4]
+full_img_shape = np.array(pet.shape)
 
 
 ################################################################################
@@ -116,129 +117,160 @@ else:
     with open(slices_file, "w") as f:
         json.dump([{"start": s.start, "stop": s.stop} for s in slices], f)
 
-pet_full = pet.copy()
-pet = pet[slices]
+# pet_full = pet.copy()
+# pet = pet[slices]
 
-if interp_x:
-    # Interpolate by factor 2 in x using half-voxel-shifted sampling.
-    nx = pet.shape[0]
-    pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
-    pet_interp[0::2, :, :] = pet  # original planes
-    pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
-    pet = pet_interp
-    voxsize = voxsize.copy()
-    voxsize[0] /= 2
-
-if interp_y:
-    # Interpolate by factor 2 in y using half-voxel-shifted sampling.
-    ny = pet.shape[1]
-    pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
-    pet_interp[:, 0::2, :] = pet  # original planes
-    pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
-    pet = pet_interp
-    voxsize = voxsize.copy()
-    voxsize[1] /= 2
-
-if interp_z:
-    # Interpolate by factor 2 in z using half-voxel-shifted sampling.
-    # New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
-    # Even new indices map to original planes (no interpolation needed).
-    # Odd new indices are the average of two neighboring original planes.
-    nz = pet.shape[2]
-    pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
-    pet_interp[:, :, 0::2] = pet  # original planes
-    pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
-    pet = pet_interp
-    voxsize = voxsize.copy()
-    voxsize[2] /= 2
-
-# ensure odd size in all dimensions by padding with a single zero if needed
-pad_width = [(0, s % 2 == 0) for s in pet.shape]
-if any(p[1] for p in pad_width):
-    pet = np.pad(pet, pad_width)
-
-################################################################################
-# %%
-# get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
-counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=200)
-peaks, _ = find_peaks(counts, distance=5, prominence=200)
-intensities = sorted(bin_edges[peaks])
-
-################################################################################
-
-# %%
-center_mm = np.zeros(3)
-offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
-
-# world coordinates of the start and end of the edge between the two cubes
-start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
-end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
-
-
-################################################################################
-# %%
-# rigidly coregister the pet to the reference image
-
-ref_img = make_two_cubes(
-    inner_cube_diam_mm,
-    offset_scalar_mm,
-    pet.shape,
-    voxsize,
-    intensities[0],
-    intensities[1],
-)
-coreg_params = register(ref_img, pet, voxsize, ncc)
-pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
-
-inv_coreg_params = invert_params(coreg_params)
-mask_coreg = warp(ref_img, inv_coreg_params, voxsize)
-
-
-################################################################################
-# %%
-if edge.startswith("x"):
-    if edge == "xs":
-        n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
-        p_coreg = np.asarray([start_mm[0], 0, 0])
-    elif edge == "xe":
-        n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
-        p_coreg = np.asarray([end_mm[0], 0, 0])
-    else:
-        raise NotImplementedError("invalid edge mode")
-elif edge.startswith("y"):
-    if edge == "ys":
-        n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
-        p_coreg = np.asarray([0, start_mm[1], 0])
-    elif edge == "ye":
-        n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
-        p_coreg = np.asarray([0, end_mm[1], 0])
-    else:
-        raise NotImplementedError("invalid edge mode")
-elif edge.startswith("z"):
-    if edge == "zs":
-        n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
-        p_coreg = np.asarray([0, 0, start_mm[2]])
-    elif edge == "ze":
-        n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
-        p_coreg = np.asarray([0, 0, end_mm[2]])
-    else:
-        raise NotImplementedError("invalid edge mode")
-else:
-    raise NotImplementedError("invalid edge mode")
+##################################################################################
+### %%
+#
+# if interp_x:
+#    # Interpolate by factor 2 in x using half-voxel-shifted sampling.
+#    nx = pet.shape[0]
+#    pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
+#    pet_interp[0::2, :, :] = pet  # original planes
+#    pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
+#    pet = pet_interp
+#    voxsize = voxsize.copy()
+#    voxsize[0] /= 2
+#
+# if interp_y:
+#    # Interpolate by factor 2 in y using half-voxel-shifted sampling.
+#    ny = pet.shape[1]
+#    pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
+#    pet_interp[:, 0::2, :] = pet  # original planes
+#    pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
+#    pet = pet_interp
+#    voxsize = voxsize.copy()
+#    voxsize[1] /= 2
+#
+# if interp_z:
+#    # Interpolate by factor 2 in z using half-voxel-shifted sampling.
+#    # New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
+#    # Even new indices map to original planes (no interpolation needed).
+#    # Odd new indices are the average of two neighboring original planes.
+#    nz = pet.shape[2]
+#    pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
+#    pet_interp[:, :, 0::2] = pet  # original planes
+#    pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
+#    pet = pet_interp
+#    voxsize = voxsize.copy()
+#    voxsize[2] /= 2
+#
+## ensure odd size in all dimensions by padding with a single zero if needed
+# pad_width = [(0, s % 2 == 0) for s in pet.shape]
+# if any(p[1] for p in pad_width):
+#    pet = np.pad(pet, pad_width)
+#
+#################################################################################
+## %%
+## get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
+# counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=200)
+# peaks, _ = find_peaks(counts, distance=5, prominence=200)
+# intensities = sorted(bin_edges[peaks])
+#
+#################################################################################
+#
+## %%
+# center_mm = np.zeros(3)
+# offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
+#
+## world coordinates of the start and end of the edge between the two cubes
+# start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
+# end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
+#
+#
+#################################################################################
+## %%
+## rigidly coregister the pet to the reference image
+#
+# ref_img = make_two_cubes(
+#    inner_cube_diam_mm,
+#    offset_scalar_mm,
+#    pet.shape,
+#    voxsize,
+#    intensities[0],
+#    intensities[1],
+# )
+# coreg_params = register(ref_img, pet, voxsize, ncc)
+# pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
+#
+# inv_coreg_params = invert_params(coreg_params)
+# mask_coreg = warp(ref_img, inv_coreg_params, voxsize)
+#
+#
+#################################################################################
+## %%
+# if edge.startswith("x"):
+#    if edge == "xs":
+#        n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
+#        p_coreg = np.asarray([start_mm[0], 0, 0])
+#    elif edge == "xe":
+#        n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
+#        p_coreg = np.asarray([end_mm[0], 0, 0])
+#    else:
+#        raise NotImplementedError("invalid edge mode")
+# elif edge.startswith("y"):
+#    if edge == "ys":
+#        n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
+#        p_coreg = np.asarray([0, start_mm[1], 0])
+#    elif edge == "ye":
+#        n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
+#        p_coreg = np.asarray([0, end_mm[1], 0])
+#    else:
+#        raise NotImplementedError("invalid edge mode")
+# elif edge.startswith("z"):
+#    if edge == "zs":
+#        n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
+#        p_coreg = np.asarray([0, 0, start_mm[2]])
+#    elif edge == "ze":
+#        n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
+#        p_coreg = np.asarray([0, 0, end_mm[2]])
+#    else:
+#        raise NotImplementedError("invalid edge mode")
+# else:
+#    raise NotImplementedError("invalid edge mode")
 
 ################################################################################
 # %%
 # calculate the distance from the edge
 
 # transform the plane parameters (normal vector and in plane point) to the original space
-p, n = transform_plane(p_coreg, n_coreg, coreg_params)
+# p, n = transform_plane(p_coreg, n_coreg, coreg_params)
 
-center = np.array(pet.shape) / 2 - 0.5
+p = np.load("p.npy")
+n = np.load("n.npy")
+
+center_shift_mm = np.zeros(3)
+
+center_shift_mm[0] = (
+    0.5 * (slices[0].start - full_img_shape[0] + slices[0].stop) * voxsize[0]
+)
+center_shift_mm[1] = (
+    0.5 * (slices[1].start - full_img_shape[1] + slices[1].stop) * voxsize[1]
+)
+center_shift_mm[2] = (
+    0.5 * (slices[2].start - full_img_shape[2] + slices[2].stop) * voxsize[2]
+)
+
+p[0] += center_shift_mm[0]
+p[1] += center_shift_mm[1]
+p[2] += center_shift_mm[2]
+
+################################################################################
+# %%
+# calculate the distance from the edge
+
+# assert wheter pet.shape is full_img_shape
+assert np.all(
+    np.array(pet.shape) == full_img_shape
+), f"pet shape {pet.shape} does not match full image shape {full_img_shape}"
+
+center_mm = (full_img_shape / 2 - 0.5) * voxsize
 
 # setup X,Y,Z coordinates in world coordinates, such that the in plane point it as (0, 0, 0)mm
-x = (np.arange(pet.shape[0]) - center[0]) * voxsize[0]
-y = (np.arange(pet.shape[1]) - center[1]) * voxsize[1]
-z = (np.arange(pet.shape[2]) - center[2]) * voxsize[2]
+x = np.arange(pet.shape[0]) * voxsize[0] - center_mm[0]
+y = np.arange(pet.shape[1]) * voxsize[1] - center_mm[1]
+z = np.arange(pet.shape[2]) * voxsize[2] - center_mm[2]
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
 # get the signed distance of all voxels from the plane
@@ -319,19 +351,3 @@ ax[0].set_title("ESF", fontsize="medium")
 ax[1].set_title("normalized LSF", fontsize="medium")
 
 fig.show()
-#
-## show the aligned images with the ROI
-## the viewer expects the images in LPS orientation, so we flip the images accordingly
-# vi = pv.ThreeAxisViewer(
-#    [
-#        np.flip(x, (0, 1))
-#        for x in [
-#            pet_coreg,
-#            mask / mask.max() + 2.0 * roi_img,
-#            pet,
-#            mask_coreg / mask_coreg.max() + 2.0 * roi_img_coreg,
-#        ]
-#    ],
-#    voxsize=voxsize,
-# )
-#
