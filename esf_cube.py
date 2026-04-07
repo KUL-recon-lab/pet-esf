@@ -89,8 +89,8 @@ full_img_shape = np.array(pet.shape)
 
 ################################################################################
 # %%
-p, n = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scalar_mm)
-
+tilted_plane_vectors = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scalar_mm)
+p, n = tilted_plane_vectors[edge]
 
 ################################################################################
 # %%

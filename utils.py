@@ -105,33 +105,32 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
 
     pet = pet_vol[slices]
 
-    #############################################################################
-    ## Interpolate by factor 2 in x using half-voxel-shifted sampling.
-    # nx = pet.shape[0]
-    # pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
-    # pet_interp[0::2, :, :] = pet  # original planes
-    # pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
-    # pet = pet_interp
+    ############################################################################
+    # Interpolate by factor 2 in x using half-voxel-shifted sampling.
+    nx = pet.shape[0]
+    pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
+    pet_interp[0::2, :, :] = pet  # original planes
+    pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
+    pet = pet_interp
 
-    ## Interpolate by factor 2 in y using half-voxel-shifted sampling.
-    # ny = pet.shape[1]
-    # pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
-    # pet_interp[:, 0::2, :] = pet  # original planes
-    # pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
-    # pet = pet_interp
+    # Interpolate by factor 2 in y using half-voxel-shifted sampling.
+    ny = pet.shape[1]
+    pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
+    pet_interp[:, 0::2, :] = pet  # original planes
+    pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
+    pet = pet_interp
 
-    ## Interpolate by factor 2 in z using half-voxel-shifted sampling.
-    ## New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
-    ## Even new indices map to original planes (no interpolation needed).
-    ## Odd new indices are the average of two neighboring original planes.
-    # nz = pet.shape[2]
-    # pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
-    # pet_interp[:, :, 0::2] = pet  # original planes
-    # pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
-    # pet = pet_interp
+    # Interpolate by factor 2 in z using half-voxel-shifted sampling.
+    # New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
+    # Even new indices map to original planes (no interpolation needed).
+    # Odd new indices are the average of two neighboring original planes.
+    nz = pet.shape[2]
+    pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
+    pet_interp[:, :, 0::2] = pet  # original planes
+    pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
+    pet = pet_interp
 
-    # voxsize = voxsize.copy()
-    # voxsize /= 2.0
+    voxsize_interp = voxsize / 2.0
     #############################################################################
 
     # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
@@ -145,61 +144,25 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
         inner_cube_diam_mm,
         offset_scalar_mm,
         pet.shape,
-        voxsize,
+        voxsize_interp,
         intensities[0],
         intensities[1],
     )
-    coreg_params = register(ref_img, pet, voxsize, ncc)
-    pet_coreg = warp(pet, coreg_params, voxsize)  # (D, H, W) tensor
-
-    inv_coreg_params = invert_params(coreg_params)
-    mask_coreg = warp(ref_img, inv_coreg_params, voxsize)
+    coreg_params = register(ref_img, pet, voxsize_interp, ncc)
 
     # setup the start and end coordinates of the inner overlapping cube in world coordinates (of the cropped image)
-    center_mm = np.zeros(3)
     offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
 
     # world coordinates of the start and end of the edge between the two cubes
-    start_mm = center_mm - inner_cube_diam_mm / 2 + np.abs(offset_mm)
-    end_mm = center_mm + inner_cube_diam_mm / 2 - np.abs(offset_mm)
+    start_mm = -inner_cube_diam_mm / 2 + np.abs(offset_mm)
+    end_mm = inner_cube_diam_mm / 2 - np.abs(offset_mm)
+
+    # pet_coreg = warp(pet, coreg_params, voxsize_interp)  # (D, H, W) tensor
+    # inv_coreg_params = invert_params(coreg_params)
+    # mask_coreg = warp(ref_img, inv_coreg_params, voxsize_interp)
 
     ################################################################################
     # %%
-    edge = "xe"
-
-    if edge.startswith("x"):
-        if edge == "xs":
-            n_coreg = np.asarray([1.0, 0.0, 0.0])  # normal vector along x-axis
-            p_coreg = np.asarray([start_mm[0], 0, 0])
-        elif edge == "xe":
-            n_coreg = np.asarray([-1.0, 0.0, 0.0])  # normal vector along x-axis
-            p_coreg = np.asarray([end_mm[0], 0, 0])
-        else:
-            raise NotImplementedError("invalid edge mode")
-    elif edge.startswith("y"):
-        if edge == "ys":
-            n_coreg = np.asarray([0.0, 1.0, 0.0])  # normal vector along y-axis
-            p_coreg = np.asarray([0, start_mm[1], 0])
-        elif edge == "ye":
-            n_coreg = np.asarray([0.0, -1.0, 0.0])  # normal vector along y-axis
-            p_coreg = np.asarray([0, end_mm[1], 0])
-        else:
-            raise NotImplementedError("invalid edge mode")
-    elif edge.startswith("z"):
-        if edge == "zs":
-            n_coreg = np.asarray([0.0, 0.0, 1.0])  # normal vector along z-axis
-            p_coreg = np.asarray([0, 0, start_mm[2]])
-        elif edge == "ze":
-            n_coreg = np.asarray([0.0, 0.0, -1.0])  # normal vector along z-axis
-            p_coreg = np.asarray([0, 0, end_mm[2]])
-        else:
-            raise NotImplementedError("invalid edge mode")
-    else:
-        raise NotImplementedError("invalid edge mode")
-
-    # transform the plane parameters (normal vector and in plane point) to the original space
-    p, n = transform_plane(p_coreg, n_coreg, coreg_params)
-
     # shift the origin vector of the plane center back to the uncropped image space
     center_shift_mm = np.zeros(3)
 
@@ -213,8 +176,43 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
         0.5 * (slices[2].start - pet_vol.shape[2] + slices[2].stop) * voxsize[2]
     )
 
-    p[0] += center_shift_mm[0]
-    p[1] += center_shift_mm[1]
-    p[2] += center_shift_mm[2]
+    # setup plane origin and normal vector in the coregistered space, which is the same as the reference image space
+    vectors = dict()
 
-    return p, n
+    vectors["xs"] = (np.asarray([start_mm[0], 0, 0]), np.asarray([1.0, 0.0, 0.0]))
+
+    vectors["xe"] = (
+        np.asarray([end_mm[0], 0, 0]),
+        np.asarray([-1.0, 0.0, 0.0]),
+    )
+
+    vectors["ys"] = (
+        np.asarray([0, start_mm[1], 0]),
+        np.asarray([0.0, 1.0, 0.0]),
+    )
+
+    vectors["ye"] = (
+        np.asarray([0, end_mm[1], 0]),
+        np.asarray([0.0, -1.0, 0.0]),
+    )
+
+    vectors["zs"] = (
+        np.asarray([0, 0, start_mm[2]]),
+        np.asarray([0.0, 0.0, 1.0]),
+    )
+
+    vectors["ze"] = (
+        np.asarray([0, 0, end_mm[2]]),
+        np.asarray([0.0, 0.0, -1.0]),
+    )
+
+    # transform vectors to tilted space
+
+    vectors_tilted = dict()
+
+    for key, val in vectors.items():
+        p_tilted, n_tilted = transform_plane(val[0], val[1], coreg_params)
+        p_tilted += center_shift_mm
+        vectors_tilted[key] = (p_tilted, n_tilted)
+
+    return vectors_tilted
