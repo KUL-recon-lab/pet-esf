@@ -64,106 +64,99 @@ offset_scalar_mm = 6.45
 nii = nib.as_closest_canonical(nib.load(fname))
 pet = nii.get_fdata().copy()
 voxsize = nii.header["pixdim"][1:4]
-full_img_shape = np.array(pet.shape)
 
-
-################################################################################
-# %%
-tilted_plane_vectors = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scalar_mm)
-p, n = tilted_plane_vectors[edge]
-
-################################################################################
-# %%
-# calculate the distance from the edge
-
-# assert wheter pet.shape is full_img_shape
-assert np.all(
-    np.array(pet.shape) == full_img_shape
-), f"pet shape {pet.shape} does not match full image shape {full_img_shape}"
-
-center_mm = (full_img_shape / 2 - 0.5) * voxsize
+center_mm = (np.array(pet.shape) / 2 - 0.5) * voxsize
 
 # setup X,Y,Z coordinates in world coordinates, such that the in plane point it as (0, 0, 0)mm
 x = np.arange(pet.shape[0]) * voxsize[0] - center_mm[0]
 y = np.arange(pet.shape[1]) * voxsize[1] - center_mm[1]
 z = np.arange(pet.shape[2]) * voxsize[2] - center_mm[2]
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
-
-# get the signed distance of all voxels from the plane
-V = np.stack([X, Y, Z], axis=-1) - p
-signed_plane_dist = V @ n
-# calculate the perpendicular distance to ray formed by plane origin and normal vector
-perp_dist = np.linalg.norm(V - signed_plane_dist[..., None] * n, axis=-1)
-
-roi_mask = (np.abs(signed_plane_dist) <= r1) * (perp_dist <= r2)
-
-sd = signed_plane_dist[roi_mask].ravel()
-signal = pet[roi_mask].ravel()
-
-#################################################################################
+V = np.stack([X, Y, Z], axis=-1)
+################################################################################
 # %%
-# fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
-
-inds = np.argsort(sd)
-sd = sd[inds]
-signal = signal[inds]
-signal /= signal[np.argmax(sd)]
-
-sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
-
-spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
-
-ss = np.linspace(sd.min(), sd.max(), 1000)
-
-esf = spline(ss)
-lsf = spline.derivative(1)(ss)
-nlsf = lsf / lsf.max()
-
-contrast = esf[-1] / esf[0]
-
-roots_half = find_roots(ss, nlsf - 0.5)
-fwhm = roots_half[1] - roots_half[0]
-
-roots_tenth = find_roots(ss, nlsf - 0.1)
-fwtm = roots_tenth[1] - roots_tenth[0]
-
-print(
-    f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
-)
+tilted_plane_vectors = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scalar_mm)
 
 ################################################################################
 # %%
-# visualize the results
+# calculate the distance from the edge
 
-fig, ax = plt.subplots(1, 2, figsize=(12, 6), layout="constrained", sharex=True)
-ax[0].plot(sd, signal, ".", markersize=0.2, color="k")
-ax[0].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
-ax[0].plot(ss, esf, "-", color="C1")
-# ax[0].set_ylim(-0.05, 1.05 * esf.max())
-ax[1].plot(ss, nlsf, "-")
+fig, ax = plt.subplots(2, 6, figsize=(18, 6), layout="constrained", sharex=True)
 
-# indicate FWHM in normalized coordinates (0 to 1)
-xmin_ax, xmax_ax = ax[1].get_xlim()
-ax[1].axhline(
-    0.5,
-    color="gray",
-    ls="--",
-    xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
-    xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
-)
-ax[1].axhline(
-    0.1,
-    color="gray",
-    ls="--",
-    xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
-    xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
-)
+for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
+    p, n = tilted_plane_vectors[edge]
+    # get the signed distance of all voxels from the plane
+    Vp = V - p
+    signed_plane_dist = Vp @ n
+    # calculate the perpendicular distance to ray formed by plane origin and normal vector
+    perp_dist = np.linalg.norm(Vp - signed_plane_dist[..., None] * n, axis=-1)
 
-for axx in ax:
+    roi_mask = (np.abs(signed_plane_dist) <= r1) * (perp_dist <= r2)
+
+    sd = signed_plane_dist[roi_mask].ravel()
+    signal = pet[roi_mask].ravel()
+
+    # %%
+    # fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
+    inds = np.argsort(sd)
+    sd = sd[inds]
+    signal = signal[inds]
+    signal /= signal[np.argmax(sd)]
+
+    sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
+
+    spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
+
+    ss = np.linspace(sd.min(), sd.max(), 1000)
+
+    esf = spline(ss)
+    lsf = spline.derivative(1)(ss)
+    nlsf = lsf / lsf.max()
+
+    contrast = esf[-1] / esf[0]
+
+    roots_half = find_roots(ss, nlsf - 0.5)
+    fwhm = roots_half[1] - roots_half[0]
+
+    roots_tenth = find_roots(ss, nlsf - 0.1)
+    fwtm = roots_tenth[1] - roots_tenth[0]
+
+    print(
+        f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
+    )
+
+    # %%
+    # visualize the results
+
+    ax[0, ie].plot(sd, signal, ".", markersize=0.2, color="k")
+    ax[0, ie].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
+    ax[0, ie].plot(ss, esf, "-", color="C1")
+    ax[1, ie].plot(ss, nlsf, "-")
+
+    # indicate FWHM in normalized coordinates (0 to 1)
+    xmin_ax, xmax_ax = ax[1, ie].get_xlim()
+    ax[1, ie].axhline(
+        0.5,
+        color="gray",
+        ls="--",
+        xmin=(roots_half[0] - xmin_ax) / (xmax_ax - xmin_ax),
+        xmax=(roots_half[-1] - xmin_ax) / (xmax_ax - xmin_ax),
+    )
+    ax[1, ie].axhline(
+        0.1,
+        color="gray",
+        ls="--",
+        xmin=(roots_tenth[0] - xmin_ax) / (xmax_ax - xmin_ax),
+        xmax=(roots_tenth[-1] - xmin_ax) / (xmax_ax - xmin_ax),
+    )
+    ax[0, ie].set_title(f"{edge}", fontsize="medium")
+
+ax[0, 0].set_ylabel(f"ESF", fontsize="medium")
+ax[1, 0].set_ylabel(f"norm. LSF", fontsize="medium")
+
+for axx in ax.ravel():
     axx.grid(ls=":")
+for axx in ax[1, :]:
     axx.set_xlabel("Distance from edge (mm)")
-
-ax[0].set_title("ESF", fontsize="medium")
-ax[1].set_title("normalized LSF", fontsize="medium")
 
 fig.show()
