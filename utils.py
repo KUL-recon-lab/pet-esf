@@ -2,7 +2,7 @@ import numpy as np
 from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 
-from utils_align import register, warp, invert_params, transform_plane
+from utils_align import register, transform_plane
 from metrics import ncc
 
 
@@ -96,7 +96,7 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
     slices = find_objects((pet_sm > 0.05 * pet_sm.max()).astype(int))[0]
     del pet_sm
 
-    # pad slices by 5 voxels in each direction
+    # pad slices by 10 voxels in each direction
     pad = 10
     slices = tuple(
         slice(max(0, s.start - pad), min(pet_vol.shape[i], s.stop + pad))

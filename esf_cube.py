@@ -1,12 +1,11 @@
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.interpolate import make_smoothing_spline
-import pymirc.viewer as pv
+from scipy.ndimage import find_objects, gaussian_filter
 
 from utils import rebin_xy, find_planes
 
@@ -71,7 +70,20 @@ center_mm = (np.array(pet.shape) / 2 - 0.5) * voxsize
 x = np.arange(pet.shape[0]) * voxsize[0] - center_mm[0]
 y = np.arange(pet.shape[1]) * voxsize[1] - center_mm[1]
 z = np.arange(pet.shape[2]) * voxsize[2] - center_mm[2]
+
 X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
+
+# pad slices by 10 voxels in each direction
+slices = find_objects((pet > 0.05 * pet.max()).astype(int))[0]
+pad = 10
+slices = tuple(
+    slice(max(0, s.start - pad), min(pet.shape[i], s.stop + pad))
+    for i, s in enumerate(slices)
+)
+X = X[slices]
+Y = Y[slices]
+Z = Z[slices]
+
 V = np.stack([X, Y, Z], axis=-1)
 ################################################################################
 # %%
@@ -94,7 +106,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     roi_mask = (np.abs(signed_plane_dist) <= r1) * (perp_dist <= r2)
 
     sd = signed_plane_dist[roi_mask].ravel()
-    signal = pet[roi_mask].ravel()
+    signal = pet[slices][roi_mask].ravel()
 
     # %%
     # fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
