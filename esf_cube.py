@@ -5,9 +5,9 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.interpolate import make_smoothing_spline
-from scipy.ndimage import find_objects, gaussian_filter
+from scipy.ndimage import find_objects
 
-from utils import rebin_xy, find_planes
+from utils import find_planes
 
 
 def find_roots(x, y):
@@ -25,16 +25,6 @@ def find_roots(x, y):
 parser = argparse.ArgumentParser()
 parser.add_argument("fname", type=Path, help="path to the NIfTI file")
 parser.add_argument(
-    "--nbins", type=int, default=128, help="number of bins for rebinning"
-)
-parser.add_argument(
-    "--edge",
-    type=str,
-    default="xs",
-    help="edge direction",
-    choices=["xs", "xe", "ys", "ye", "zs", "ze"],
-)
-parser.add_argument(
     "--r1", type=float, default=8.0, help="outer ROI radius in mm along edge direction"
 )
 parser.add_argument(
@@ -48,8 +38,6 @@ args = parser.parse_args()
 
 fname: Path = args.fname
 data_dir: Path = fname.parent
-nbins: int = args.nbins
-edge: str = args.edge
 r1: float = args.r1
 r2: float = args.r2
 lam: float = args.lam
@@ -118,11 +106,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     signal = signal[inds]
     signal /= signal[np.argmax(sd)]
 
-    # sd_binned, signal_binned = rebin_xy(sd, signal, nbins=nbins)
-    sd_binned = sd
-    signal_binned = signal
-
-    spline = make_smoothing_spline(sd_binned, signal_binned, lam=lam)
+    spline = make_smoothing_spline(sd, signal, lam=lam)
 
     # ss, dss = np.linspace(sd.min(), sd.max(), 2056, retstep=True)
     ss, dss = np.linspace(-r1, r1, 512, retstep=True, endpoint=False)
@@ -161,8 +145,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     # %%
     # visualize the results
 
-    ax[0, ie].plot(sd, signal, ".", markersize=0.2, color="k")
-    ax[0, ie].plot(sd_binned, signal_binned, ".", markersize=3.0, color="C0")
+    ax[0, ie].plot(sd, signal, ".", markersize=3.0, color="C0")
     ax[0, ie].plot(ss, esf, "-", color="C1")
     ax[1, ie].plot(ss, nlsf, "-")
     ax[2, ie].plot(spatial_freq, mtf, ".-")
