@@ -6,7 +6,7 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.interpolate import make_smoothing_spline
-from scipy.ndimage import find_objects
+from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 
 from utils import find_planes
@@ -73,6 +73,12 @@ parser.add_argument(
     default=6.45,
     help="scalar for calculating the plane offset from the cube diameter in mm for plane finding",
 )
+parser.add_argument(
+    "--filter_fwhm_mm",
+    type=float,
+    help="FWHM of the Gaussian filter in mm for smoothing the PET data before plane finding",
+    default=None,
+)
 
 args = parser.parse_args()
 
@@ -83,6 +89,7 @@ r2: float = args.r2
 pvf: Path | None = args.pvf
 vis: bool = args.vis
 gap_threshold: float | None = args.gap_th
+filter_fwhm_mm: float | None = args.filter_fwhm_mm
 
 
 inner_cube_diam_mm = args.inner_cube_diam_mm
@@ -94,6 +101,9 @@ offset_scalar_mm = args.offset_scalar_mm
 nii = nib.as_closest_canonical(nib.load(fname))
 pet = nii.get_fdata().copy()
 voxsize = nii.header["pixdim"][1:4]
+
+if filter_fwhm_mm is not None:
+    pet = gaussian_filter(pet, sigma=filter_fwhm_mm / (2.35 * voxsize))
 
 center_mm = (np.array(pet.shape) / 2 - 0.5) * voxsize
 

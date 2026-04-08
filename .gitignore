@@ -3,6 +3,7 @@ test.py
 .vscode/*
 .claude/*
 data/*
+plane_vectors.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
