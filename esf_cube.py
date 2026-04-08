@@ -43,9 +43,6 @@ parser.add_argument(
     "--r2", type=float, default=2.5, help="inner ROI radius in mm perpendicular to edge"
 )
 parser.add_argument(
-    "--lam", type=float, default=0.2, help="smoothing spline regularization parameter"
-)
-parser.add_argument(
     "--pvf",
     type=Path,
     default=None,
@@ -58,7 +55,6 @@ fname: Path = args.fname
 data_dir: Path = fname.parent
 r1: float = args.r1
 r2: float = args.r2
-lam: float = args.lam
 pvf: Path | None = args.pvf
 
 
@@ -127,14 +123,44 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     sd = signed_plane_dist[roi_mask].ravel()
     signal = pet[slices][roi_mask].ravel()
 
-    # %%
-    # fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
+    #############################################################################
+    ## %%
+    ## fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
+    # inds = np.argsort(sd)
+    # sd = sd[inds]
+    # signal = signal[inds]
+    # signal /= signal[np.argmax(sd)]
+    # spline = make_smoothing_spline(sd, signal, lam=lam)
+    #############################################################################
+
     inds = np.argsort(sd)
     sd = sd[inds]
     signal = signal[inds]
-    signal /= signal[np.argmax(sd)]
+    signal /= signal.max()
 
-    spline = make_smoothing_spline(sd, signal, lam=lam)
+    gaps = np.diff(sd)
+
+    # threshold: gaps much larger than the within-cluster spread
+    # gap_threshold = np.percentile(gaps, 75) * 2.0  # tune if needed
+    gap_threshold = np.percentile(gaps, 95) * 3.0  # tune if needed
+    split_indices = np.where(gaps > gap_threshold)[0] + 1
+
+    cluster_ids = np.zeros(len(sd), dtype=int)
+    cluster_ids[split_indices] = 1
+    cluster_ids = np.cumsum(cluster_ids)
+
+    # for each cluster: mean distance and mean signal
+    bin_centers = np.array(
+        [sd[cluster_ids == c].mean() for c in np.unique(cluster_ids)]
+    )
+    esf_binned = np.array(
+        [signal[cluster_ids == c].mean() for c in np.unique(cluster_ids)]
+    )
+    esf_std = np.array([signal[cluster_ids == c].std() for c in np.unique(cluster_ids)])
+
+    spline = make_smoothing_spline(bin_centers, esf_binned)
+
+    #############################################################################
 
     # ss, dss = np.linspace(sd.min(), sd.max(), 2056, retstep=True)
     ss, dss = np.linspace(-r1, r1, 512, retstep=True, endpoint=False)
@@ -174,6 +200,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     # visualize the results
 
     ax[0, ie].plot(sd, signal, ".", markersize=3.0, color="C0")
+    ax[0, ie].plot(bin_centers, esf_binned, "x", markersize=5.0, color="k")
     ax[0, ie].plot(ss, esf, "-", color="C1")
     ax[1, ie].plot(ss, nlsf, "-")
     ax[2, ie].plot(spatial_freq, mtf, ".-")
