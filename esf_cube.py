@@ -9,6 +9,7 @@ from scipy.interpolate import make_smoothing_spline
 from scipy.ndimage import find_objects
 
 from utils import find_planes
+from vis_pet import show_pet_cuts
 
 
 def save_plane_vectors(path, d):
@@ -48,6 +49,11 @@ parser.add_argument(
     default=None,
     help="file containing the plane vectors in json format",
 )
+parser.add_argument(
+    "--vis",
+    action="store_true",
+    help="open interactive 3-axis PET viewer with plane overlay",
+)
 
 args = parser.parse_args()
 
@@ -56,6 +62,7 @@ data_dir: Path = fname.parent
 r1: float = args.r1
 r2: float = args.r2
 pvf: Path | None = args.pvf
+vis: bool = args.vis
 
 
 inner_cube_diam_mm = 29.3
@@ -87,6 +94,11 @@ slices = tuple(
 X = X[slices]
 Y = Y[slices]
 Z = Z[slices]
+
+# 1-D world coordinate arrays for the cropped volume (used by the viewer)
+x_crop = x[slices[0]]
+y_crop = y[slices[1]]
+z_crop = z[slices[2]]
 
 V = np.stack([X, Y, Z], axis=-1)
 ################################################################################
@@ -252,4 +264,16 @@ for axx in ax[2, :]:
     axx.set_xlabel("spatial freq. (1/mm)")
 
 fig.suptitle(str(fname), fontsize="small")
-fig.show()
+
+if vis:
+    _fig_vis, _ax_vis, _widgets_vis = show_pet_cuts(
+        pet[slices],
+        x_crop,
+        y_crop,
+        z_crop,
+        tilted_plane_vectors=tilted_plane_vectors,
+        vmax=np.percentile(pet[slices], 99.5),
+        fig_title=str(fname),
+    )
+
+plt.show()
