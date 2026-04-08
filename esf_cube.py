@@ -124,14 +124,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     signal = pet[slices][roi_mask].ravel()
 
     #############################################################################
-    ## %%
-    ## fit a smoothing spline to the data and calculate the ESF, LSF, and FWHM
-    # inds = np.argsort(sd)
-    # sd = sd[inds]
-    # signal = signal[inds]
-    # signal /= signal[np.argmax(sd)]
-    # spline = make_smoothing_spline(sd, signal, lam=lam)
-    #############################################################################
+    # bin the ESF around sample clusters and fit a smoothing spline
 
     inds = np.argsort(sd)
     sd = sd[inds]
@@ -162,8 +155,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
 
     #############################################################################
 
-    # ss, dss = np.linspace(sd.min(), sd.max(), 2056, retstep=True)
-    ss, dss = np.linspace(-r1, r1, 512, retstep=True, endpoint=False)
+    ss, dss = np.linspace(-r1, r1, 2048, retstep=True, endpoint=False)
 
     esf = spline(ss)
     lsf = spline.derivative(1)(ss)
@@ -192,9 +184,13 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
         f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
     )
 
-    spatial_freq = np.fft.fftshift(np.fft.fftfreq(len(ss), dss))
-    mtf = np.fft.fftshift(np.abs(np.fft.fft(nlsf)))
-    mtf /= mtf[mtf.size // 2]
+    # calculate the MTF
+    peak_idx = np.argmax(nlsf)
+    lsf_centered = np.roll(nlsf, -peak_idx)
+
+    mtf = np.abs(np.fft.rfft(lsf_centered))
+    spatial_freq = np.fft.rfftfreq(len(lsf_centered), dss)  # dss unchanged
+    mtf /= mtf[0]
 
     # %%
     # visualize the results
@@ -252,7 +248,7 @@ for axx in ax[0, :]:
 for axx in ax[1, :]:
     axx.set_xlabel("distance (mm)")
 for axx in ax[2, :]:
-    axx.set_xlim(0, 0.5)
+    axx.set_xlim(0, 0.7)
     axx.set_xlabel("spatial freq. (1/mm)")
 
 fig.suptitle(str(fname), fontsize="small")
