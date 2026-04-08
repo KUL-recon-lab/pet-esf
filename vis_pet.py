@@ -161,26 +161,26 @@ def show_pet_cuts(
     selected_mask:  list[str | None] = [None]
 
     # ---- figure layout -------------------------------------------------------
-    # rows: images | plane buttons | mask buttons | sliders | textboxes | colorbar
+    # rows: images | sliders | textboxes | colorbar | plane buttons | mask buttons
     fig = plt.figure(figsize=figsize)
     if fig_title is not None:
         fig.suptitle(fig_title)
 
     gs = fig.add_gridspec(
         6, 3,
-        height_ratios=[8, 0.7, 0.7, 0.9, 0.9, 0.4],
+        height_ratios=[8, 0.9, 0.9, 0.4, 0.7, 0.7],
         hspace=0.75,
         wspace=0.45,
     )
 
     ax_im        = [fig.add_subplot(gs[0, c]) for c in range(3)]
-    ax_plane_row = fig.add_subplot(gs[1, :])
-    ax_mask_row  = fig.add_subplot(gs[2, :])
-    ax_sl        = [fig.add_subplot(gs[3, c]) for c in range(3)]
-    ax_cb        = fig.add_subplot(gs[5, :])
+    ax_sl        = [fig.add_subplot(gs[1, c]) for c in range(3)]
+    ax_cb        = fig.add_subplot(gs[3, :])
+    ax_plane_row = fig.add_subplot(gs[4, :])
+    ax_mask_row  = fig.add_subplot(gs[5, :])
 
     # textbox row: 4 items (vmin, vmax, cmap, interp) via sub-gridspec
-    gs_tb = GridSpecFromSubplotSpec(1, 4, subplot_spec=gs[4, :], wspace=0.6)
+    gs_tb = GridSpecFromSubplotSpec(1, 4, subplot_spec=gs[2, :], wspace=0.6)
     ax_tb_vmin  = fig.add_subplot(gs_tb[0, 0])
     ax_tb_vmax  = fig.add_subplot(gs_tb[0, 1])
     ax_tb_cmap  = fig.add_subplot(gs_tb[0, 2])
@@ -436,6 +436,47 @@ def show_pet_cuts(
     tb_vmax.on_submit(_update_clim)
     tb_cmap.on_submit(_update_cmap)
     tb_interp.on_submit(_update_interp)
+
+    # ---- click-to-navigate ---------------------------------------------------
+    def _on_click(event) -> None:
+        if event.button != 1 or event.xdata is None or event.ydata is None:
+            return
+        # Identify which panel was clicked and map world coords → voxel indices
+        if event.inaxes is ax_im[0]:
+            # panel 0: horiz=y, vert=z  →  update sy, sz
+            new_iy = int(np.argmin(np.abs(y_crop - event.xdata)))
+            new_iz = int(np.argmin(np.abs(z_crop - event.ydata)))
+            sy.eventson = False
+            sz.eventson = False
+            sy.set_val(new_iy)
+            sz.set_val(new_iz)
+            sy.eventson = True
+            sz.eventson = True
+        elif event.inaxes is ax_im[1]:
+            # panel 1: horiz=x, vert=z  →  update sx, sz
+            new_ix = int(np.argmin(np.abs(x_crop - event.xdata)))
+            new_iz = int(np.argmin(np.abs(z_crop - event.ydata)))
+            sx.eventson = False
+            sz.eventson = False
+            sx.set_val(new_ix)
+            sz.set_val(new_iz)
+            sx.eventson = True
+            sz.eventson = True
+        elif event.inaxes is ax_im[2]:
+            # panel 2: horiz=x, vert=y  →  update sx, sy
+            new_ix = int(np.argmin(np.abs(x_crop - event.xdata)))
+            new_iy = int(np.argmin(np.abs(y_crop - event.ydata)))
+            sx.eventson = False
+            sy.eventson = False
+            sx.set_val(new_ix)
+            sy.set_val(new_iy)
+            sx.eventson = True
+            sy.eventson = True
+        else:
+            return
+        _update_slices(None)
+
+    fig.canvas.mpl_connect("button_press_event", _on_click)
 
     widgets = {
         "s_x": sx,

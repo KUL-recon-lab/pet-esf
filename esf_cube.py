@@ -55,6 +55,24 @@ parser.add_argument(
     action="store_true",
     help="open interactive 3-axis PET viewer with plane overlay",
 )
+parser.add_argument(
+    "--gap_th",
+    type=float,
+    default=None,
+    help="threshold for splitting ESF clusters in mm (default: 3x the 95th percentile of gaps)",
+)
+parser.add_argument(
+    "--inner_cube_diam_mm",
+    type=float,
+    default=29.3,
+    help="diameter of the inner cube in mm for plane finding",
+)
+parser.add_argument(
+    "--offset_scalar_mm",
+    type=float,
+    default=6.45,
+    help="scalar for calculating the plane offset from the cube diameter in mm for plane finding",
+)
 
 args = parser.parse_args()
 
@@ -64,10 +82,11 @@ r1: float = args.r1
 r2: float = args.r2
 pvf: Path | None = args.pvf
 vis: bool = args.vis
+gap_threshold: float | None = args.gap_th
 
 
-inner_cube_diam_mm = 29.3
-offset_scalar_mm = 6.45
+inner_cube_diam_mm = args.inner_cube_diam_mm
+offset_scalar_mm = args.offset_scalar_mm
 ################################################################################
 # %%
 # READ THE DATA FROM NIFTI, orient to RAS
@@ -147,8 +166,9 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
     gaps = np.diff(sd)
 
     # threshold: gaps much larger than the within-cluster spread
-    # gap_threshold = np.percentile(gaps, 75) * 2.0  # tune if needed
-    gap_threshold = np.percentile(gaps, 95) * 3.0  # tune if needed
+    if gap_threshold is None:
+        gap_threshold = min(np.percentile(gaps, 95) * 3.0, voxsize.min() / 2)
+
     split_indices = np.where(gaps > gap_threshold)[0] + 1
 
     cluster_ids = np.zeros(len(sd), dtype=int)
