@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,17 @@ from scipy.interpolate import make_smoothing_spline
 from scipy.ndimage import find_objects
 
 from utils import find_planes
+
+
+def save_plane_vectors(path, d):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2)
+
+
+def load_plane_vectors(path):
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    return {k: tuple(v) for k, v in raw.items()}
 
 
 def find_roots(x, y):
@@ -33,6 +45,12 @@ parser.add_argument(
 parser.add_argument(
     "--lam", type=float, default=0.2, help="smoothing spline regularization parameter"
 )
+parser.add_argument(
+    "--pvf",
+    type=Path,
+    default=None,
+    help="file containing the plane vectors in json format",
+)
 
 args = parser.parse_args()
 
@@ -41,6 +59,8 @@ data_dir: Path = fname.parent
 r1: float = args.r1
 r2: float = args.r2
 lam: float = args.lam
+pvf: Path | None = args.pvf
+
 
 inner_cube_diam_mm = 29.3
 offset_scalar_mm = 6.45
@@ -75,7 +95,15 @@ Z = Z[slices]
 V = np.stack([X, Y, Z], axis=-1)
 ################################################################################
 # %%
-tilted_plane_vectors = find_planes(pet, voxsize, inner_cube_diam_mm, offset_scalar_mm)
+if pvf is not None and pvf.exists():
+    tilted_plane_vectors = load_plane_vectors(pvf)
+    print(f"Loaded plane vectors from {pvf}")
+else:
+    tilted_plane_vectors = find_planes(
+        pet, voxsize, inner_cube_diam_mm, offset_scalar_mm
+    )
+    save_plane_vectors("plane_vectors.json", tilted_plane_vectors)
+    print(f"Calculated plane vectors and saved to plane_vectors.json")
 
 ################################################################################
 # %%
@@ -122,7 +150,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
         raise ValueError(f"Could not find two roots for half maximum for edge {edge}")
     if len(roots_half) > 2:
         # take the two roots that are closest to the center (0 mm)
-        roots_half = sorted(roots_half, key=lambda x: abs(x))[:2]
+        roots_half = sorted(sorted(roots_half, key=lambda x: abs(x))[:2])
     fwhm = roots_half[1] - roots_half[0]
 
     roots_tenth = find_roots(ss, nlsf - 0.1)
@@ -130,7 +158,7 @@ for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
         raise ValueError(f"Could not find two roots for tenth maximum for edge {edge}")
     if len(roots_tenth) > 2:
         # take the two roots that are closest to the center (0 mm)
-        roots_tenth = sorted(roots_tenth, key=lambda x: abs(x))[:2]
+        roots_tenth = sorted(sorted(roots_tenth, key=lambda x: abs(x))[:2])
 
     fwtm = roots_tenth[1] - roots_tenth[0]
 
@@ -191,10 +219,14 @@ ax[2, 0].set_ylabel(f"norm. MTF", fontsize="medium")
 
 for axx in ax.ravel():
     axx.grid(ls=":")
+for axx in ax[0, :]:
+    axx.set_xlabel("distance (mm)")
+    axx.set_ylim(-0.05, 1.1)
 for axx in ax[1, :]:
     axx.set_xlabel("distance (mm)")
 for axx in ax[2, :]:
     axx.set_xlim(0, 0.5)
     axx.set_xlabel("spatial freq. (1/mm)")
 
+fig.suptitle(str(fname), fontsize="small")
 fig.show()

@@ -213,6 +213,9 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
     for key, val in vectors.items():
         p_tilted, n_tilted = transform_plane(val[0], val[1], coreg_params)
         p_tilted += center_shift_mm
-        vectors_tilted[key] = (p_tilted, n_tilted)
+        vectors_tilted[key] = (
+            [float(x) for x in p_tilted],
+            [float(x) for x in n_tilted],
+        )
 
     return vectors_tilted
