@@ -228,31 +228,47 @@ def show_pet_cuts(
     ax_im[1].set_title(f"y = {y_crop[iy0]:.1f} mm", fontsize="small")
     ax_im[2].set_title(f"z = {z_crop[iz0]:.1f} mm", fontsize="small")
 
-    # ---- plane overlay lines (one per panel, hidden until a plane is chosen) ----
-    line_kw = dict(color="tab:red", lw=1.5, ls="--")
-    plane_lines = [ax_im[k].plot([], [], **line_kw)[0] for k in range(3)]
+    # ---- plane overlay lines + origin markers (hidden until a plane is chosen) ----
+    line_kw   = dict(color="tab:red", lw=1.5, ls="--")
+    marker_kw = dict(color="tab:red", marker="o", ms=6, ls="none", zorder=5)
+    plane_lines   = [ax_im[k].plot([], [], **line_kw)[0]   for k in range(3)]
+    plane_markers = [ax_im[k].plot([], [], **marker_kw)[0] for k in range(3)]
 
     def _update_plane_lines(ix: int, iy: int, iz: int) -> None:
         edge = selected_plane[0]
         if edge is None or tilted_plane_vectors is None or edge not in tilted_plane_vectors:
             for line in plane_lines:
                 line.set_data([], [])
+            for marker in plane_markers:
+                marker.set_data([], [])
             return
 
         p = np.asarray(tilted_plane_vectors[edge][0], dtype=float)
         n = np.asarray(tilted_plane_vectors[edge][1], dtype=float)
 
-        # Panel 0: fixed x, displays (y, z)
+        # Panel 0: fixed x, displays (y, z)  → dot only when slice is at p[0]
         c1p, c2p = _plane_line_on_cut(p, n, 0, x_crop[ix], y_crop, z_crop)
         plane_lines[0].set_data(c1p, c2p)
+        plane_markers[0].set_data(
+            [p[1]] if abs(x_crop[ix] - p[0]) <= dx / 2 else [],
+            [p[2]] if abs(x_crop[ix] - p[0]) <= dx / 2 else [],
+        )
 
-        # Panel 1: fixed y, displays (x, z)
+        # Panel 1: fixed y, displays (x, z)  → dot only when slice is at p[1]
         c1p, c2p = _plane_line_on_cut(p, n, 1, y_crop[iy], x_crop, z_crop)
         plane_lines[1].set_data(c1p, c2p)
+        plane_markers[1].set_data(
+            [p[0]] if abs(y_crop[iy] - p[1]) <= dy / 2 else [],
+            [p[2]] if abs(y_crop[iy] - p[1]) <= dy / 2 else [],
+        )
 
-        # Panel 2: fixed z, displays (x, y)
+        # Panel 2: fixed z, displays (x, y)  → dot only when slice is at p[2]
         c1p, c2p = _plane_line_on_cut(p, n, 2, z_crop[iz], x_crop, y_crop)
         plane_lines[2].set_data(c1p, c2p)
+        plane_markers[2].set_data(
+            [p[0]] if abs(z_crop[iz] - p[2]) <= dz / 2 else [],
+            [p[1]] if abs(z_crop[iz] - p[2]) <= dz / 2 else [],
+        )
 
     # ---- plane selector: one Button per option in a horizontal strip ----
     ax_btn_row.set_axis_off()
