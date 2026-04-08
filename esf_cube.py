@@ -7,6 +7,7 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy.interpolate import make_smoothing_spline
 from scipy.ndimage import find_objects
+from scipy.signal import find_peaks
 
 from utils import find_planes
 from vis_pet import show_pet_cuts
@@ -266,6 +267,12 @@ for axx in ax[2, :]:
 fig.suptitle(str(fname), fontsize="small")
 
 if vis:
+    counts, bin_edges = np.histogram(
+        pet[slices][pet[slices] > 0.1 * pet[slices].max()].ravel(), bins=200
+    )
+    peaks, _ = find_peaks(counts, distance=5, prominence=200)
+    intensities = sorted(bin_edges[peaks])
+
     _fig_vis, _ax_vis, _widgets_vis = show_pet_cuts(
         pet[slices],
         x_crop,
@@ -273,7 +280,7 @@ if vis:
         z_crop,
         tilted_plane_vectors=tilted_plane_vectors,
         roi_masks=roi_masks,
-        vmax=np.percentile(pet[slices], 99.5),
+        vmax=1.2 * intensities[-1],
         fig_title=str(fname),
     )
 
