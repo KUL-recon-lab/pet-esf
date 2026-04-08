@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, TextBox, RadioButtons
+from matplotlib.gridspec import GridSpecFromSubplotSpec
+from matplotlib.widgets import Slider, TextBox, Button
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,11 @@ def _plane_line_on_cut(
 # Main viewer
 # ---------------------------------------------------------------------------
 
+_COLOR_ACTIVE   = "#4C9BE8"   # highlighted button
+_COLOR_INACTIVE = "white"
+_COLOR_HOVER    = "#D0E8FF"
+
+
 def show_pet_cuts(
     pet_crop: np.ndarray,
     x_crop: np.ndarray,
@@ -115,7 +121,7 @@ def show_pet_cuts(
     """Interactive 3-axis PET slice viewer with optional tilted-plane overlay.
 
     Displays three orthogonal cuts through *pet_crop* with sliders to scroll
-    each axis.  When *tilted_plane_vectors* is supplied a radio-button row
+    each axis.  When *tilted_plane_vectors* is supplied a button-row selector
     lets the user pick a plane (by edge label, e.g. "xe", "ys") or "None";
     the selected plane is drawn as a dashed red line on all three panels.
 
@@ -170,21 +176,20 @@ def show_pet_cuts(
     selected_plane: list[str | None] = [None]  # mutable container for closures
 
     # ---- figure layout ----
-    # rows: images | plane radio | slice sliders | vmin/vmax/cmap | colorbar
-    n_radio_rows = 1 if len(plane_labels) <= 8 else 2  # single row fits ≤ 8 options
+    # rows: images | plane buttons | slice sliders | vmin/vmax/cmap | colorbar
     fig = plt.figure(figsize=figsize)
     if fig_title is not None:
         fig.suptitle(fig_title)
 
     gs = fig.add_gridspec(
         5, 3,
-        height_ratios=[8, max(0.8, 0.25 * len(plane_labels)), 0.9, 0.9, 0.4],
+        height_ratios=[8, 0.7, 0.9, 0.9, 0.4],
         hspace=0.75,
         wspace=0.45,
     )
 
     ax_im = [fig.add_subplot(gs[0, c]) for c in range(3)]
-    ax_rb = fig.add_subplot(gs[1, :])   # radio buttons span all columns
+    ax_btn_row = fig.add_subplot(gs[1, :])   # placeholder for the button row
     ax_sl = [fig.add_subplot(gs[2, c]) for c in range(3)]
     ax_tb = [fig.add_subplot(gs[3, c]) for c in range(3)]
     ax_cb = fig.add_subplot(gs[4, :])
@@ -249,22 +254,53 @@ def show_pet_cuts(
         c1p, c2p = _plane_line_on_cut(p, n, 2, z_crop[iz], x_crop, y_crop)
         plane_lines[2].set_data(c1p, c2p)
 
-    # ---- radio buttons (plane selector) ----
-    ax_rb.set_axis_off()
-    try:
-        rb = RadioButtons(ax_rb, plane_labels, active=0, orientation="horizontal")
-    except TypeError:
-        # older matplotlib without orientation parameter
-        rb = RadioButtons(ax_rb, plane_labels, active=0)
+    # ---- plane selector: one Button per option in a horizontal strip ----
+    ax_btn_row.set_axis_off()
+    # Add a small label at the left of the row
+    ax_btn_row.text(
+        0.0, 0.5, "Plane overlay:",
+        transform=ax_btn_row.transAxes,
+        va="center", ha="left", fontsize="small",
+    )
 
-    ax_rb.set_title("Plane overlay:", fontsize="small", loc="left", pad=2)
+    n_opts = len(plane_labels)
+    label_frac = 0.12          # fraction of row width reserved for the label
+    btn_gap    = 0.005         # gap between buttons as fraction of row width
+    btn_width  = (1.0 - label_frac - btn_gap * (n_opts - 1)) / n_opts
 
-    def _on_plane_select(label: str) -> None:
-        selected_plane[0] = None if label == "None" else label
-        _update_plane_lines(int(sx.val), int(sy.val), int(sz.val))
-        fig.canvas.draw_idle()
+    # Build one sub-axes per button using figure-level coordinates derived
+    # from ax_btn_row's bounding box (evaluated after the gridspec is set up).
+    # We defer creation so the layout is finalised first.
+    fig.canvas.draw()  # force layout computation
+    bbox = ax_btn_row.get_position()  # Bbox in figure coords
 
-    rb.on_clicked(_on_plane_select)
+    btn_axes: list = []
+    for k in range(n_opts):
+        left = bbox.x0 + (label_frac + k * (btn_width + btn_gap)) * bbox.width
+        bottom = bbox.y0
+        width  = btn_width * bbox.width
+        height = bbox.height
+        btn_axes.append(fig.add_axes([left, bottom, width, height]))
+
+    plane_btns: list[Button] = []
+    for k, label in enumerate(plane_labels):
+        color = _COLOR_ACTIVE if k == 0 else _COLOR_INACTIVE
+        btn = Button(btn_axes[k], label, color=color, hovercolor=_COLOR_HOVER)
+        btn.label.set_fontsize("small")
+        plane_btns.append(btn)
+
+    def _make_btn_cb(label: str, idx: int):
+        def _cb(_event) -> None:
+            for k, b in enumerate(plane_btns):
+                b.color = _COLOR_ACTIVE if k == idx else _COLOR_INACTIVE
+                b.ax.set_facecolor(_COLOR_ACTIVE if k == idx else _COLOR_INACTIVE)
+            selected_plane[0] = None if label == "None" else label
+            _update_plane_lines(int(sx.val), int(sy.val), int(sz.val))
+            fig.canvas.draw_idle()
+        return _cb
+
+    for k, (btn, label) in enumerate(zip(plane_btns, plane_labels)):
+        btn.on_clicked(_make_btn_cb(label, k))
 
     # ---- slice sliders ----
     sx = Slider(ax_sl[0], "x", 0, nx - 1, valinit=ix0, valstep=1)
@@ -323,7 +359,7 @@ def show_pet_cuts(
         "s_x": sx,
         "s_y": sy,
         "s_z": sz,
-        "rb_plane": rb,
+        "plane_btns": plane_btns,
         "tb_vmin": tb_vmin,
         "tb_vmax": tb_vmax,
         "tb_cmap": tb_cmap,
