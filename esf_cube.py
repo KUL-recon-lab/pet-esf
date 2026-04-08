@@ -272,6 +272,7 @@ if vis:
         y_crop,
         z_crop,
         tilted_plane_vectors=tilted_plane_vectors,
+        roi_masks=roi_masks,
         vmax=np.percentile(pet[slices], 99.5),
         fig_title=str(fname),
     )
