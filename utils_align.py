@@ -233,7 +233,7 @@ def register(
     history_size: int = 10,
     tol: float = 1e-8,
     verbose: bool = True,
-) -> Params:
+) -> tuple[Params, float]:
     """
     Single-scale rigid registration using L-BFGS.
 
@@ -255,6 +255,7 @@ def register(
 
     Returns:
         params as a tuple of 6 floats (tz, ty, tx, ωz, ωy, ωx).
+        final loss value.
         Call warp(moving, params, voxel_size) to obtain the aligned image.
     """
     device = _image_device(fixed)
@@ -319,7 +320,7 @@ def register(
             f" rot = [{result[3]:.4f}, {result[4]:.4f}, {result[5]:.4f}] rad"
         )
 
-    return result
+    return result, float(loss_now)
 
 
 def transform_plane(

@@ -64,13 +64,13 @@ parser.add_argument(
 parser.add_argument(
     "--inner_cube_diam_mm",
     type=float,
-    default=29.3,
+    default=29.9,
     help="diameter of the inner cube in mm for plane finding",
 )
 parser.add_argument(
     "--offset_scalar_mm",
     type=float,
-    default=6.45,
+    default=6.65,
     help="scalar for calculating the plane offset from the cube diameter in mm for plane finding",
 )
 parser.add_argument(
@@ -137,7 +137,7 @@ if pvf is not None and pvf.exists():
     tilted_plane_vectors = load_plane_vectors(pvf)
     print(f"Loaded plane vectors from {pvf}")
 else:
-    tilted_plane_vectors = find_planes(
+    tilted_plane_vectors, reg_loss = find_planes(
         pet, voxsize, inner_cube_diam_mm, offset_scalar_mm
     )
     save_plane_vectors("plane_vectors.json", tilted_plane_vectors)

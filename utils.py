@@ -62,7 +62,9 @@ def make_two_cubes(
     return volume
 
 
-def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: float):
+def find_planes(
+    pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: float
+) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], float]:
     # crop pet_vol to bounding box of non-zero values
     pet_sm = gaussian_filter(pet_vol, 4.0 / (2.35 * voxsize))
     slices = find_objects((pet_sm > 0.05 * pet_sm.max()).astype(int))[0]
@@ -120,7 +122,7 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
         intensities[0],
         intensities[1],
     )
-    coreg_params = register(ref_img, pet, voxsize_interp, ncc)
+    coreg_params, final_loss = register(ref_img, pet, voxsize_interp, ncc)
 
     # setup the start and end coordinates of the inner overlapping cube in world coordinates (of the cropped image)
     offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
@@ -190,4 +192,4 @@ def find_planes(pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: f
             [float(x) for x in n_tilted],
         )
 
-    return vectors_tilted
+    return vectors_tilted, final_loss
