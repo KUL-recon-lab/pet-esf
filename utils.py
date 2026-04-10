@@ -1,9 +1,11 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 
-from utils_align import register, transform_plane
+from utils_align import register, transform_plane, warp
 from metrics import ncc
+from vis_pet import show_pet_cuts
 
 
 def make_two_cubes(
@@ -114,12 +116,11 @@ def find_planes(
     #############################################################################
 
     # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
-    counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=200)
-    peaks, _ = find_peaks(counts / counts.max(), distance=20, prominence=0.05)
+    counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=400)
+    peaks, _ = find_peaks(counts / counts.max(), distance=8, prominence=0.1)
     intensities = sorted(bin_edges[peaks])
 
     # rigidly coregister the pet to the reference image
-
     ref_img = make_two_cubes(
         inner_cube_diam_mm,
         offset_scalar_mm,
@@ -138,16 +139,22 @@ def find_planes(
     end_mm = inner_cube_diam_mm / 2 - np.abs(offset_mm)
 
     #################
-    # from utils_align import warp
-    # import pymirc.viewer as pv
+    pet_coreg = warp(pet, coreg_params, voxsize_interp)
 
-    # pet_coreg = warp(pet, coreg_params, voxsize_interp)  # (D, H, W) tensor
-    # vi = pv.ThreeAxisViewer(
-    #    pet_coreg - ref_img,
-    #    voxsize=voxsize_interp,
-    #    imshow_kwargs=dict(cmap="bwr", vmin=-pet.max(), vmax=pet.max()),
-    # )
-    # breakpoint()
+    xcrop = np.linspace(-1, 1, pet.shape[0])
+    ycrop = np.linspace(-1, 1, pet.shape[1])
+    zcrop = np.linspace(-1, 1, pet.shape[2])
+    fig, _, _ = show_pet_cuts(
+        pet_coreg - ref_img,
+        xcrop,
+        ycrop,
+        zcrop,
+        cmap="bwr",
+        vmin=-0.5 * pet.max(),
+        vmax=0.5 * pet.max(),
+    )
+    fig.savefig("coreg_diff.png", dpi=300)
+    plt.close(fig)
 
     ################################################################################
     # %%

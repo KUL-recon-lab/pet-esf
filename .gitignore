@@ -4,6 +4,7 @@ test.py
 .claude/*
 data/*
 plane_vectors.json
+coreg_diff.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
