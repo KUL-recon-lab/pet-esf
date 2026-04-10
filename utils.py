@@ -80,31 +80,37 @@ def find_planes(
     pet = pet_vol[slices]
 
     ############################################################################
-    # Interpolate by factor 2 in x using half-voxel-shifted sampling.
+    # Interpolate by factor 4 in x.
+    # New sampling positions in original voxel coords: 0, 0.25, 0.5, 0.75, 1, ...
+    # Every 4th new index maps to an original plane; the 3 in-between indices are
+    # linearly interpolated at 1/4, 1/2, and 3/4 between neighboring original planes.
     nx = pet.shape[0]
-    pet_interp = np.empty((2 * nx - 1, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
-    pet_interp[0::2, :, :] = pet  # original planes
-    pet_interp[1::2, :, :] = 0.5 * (pet[:-1, :, :] + pet[1:, :, :])  # midpoints
+    pet_interp = np.empty((4 * nx - 3, pet.shape[1], pet.shape[2]), dtype=pet.dtype)
+    pet_interp[0::4, :, :] = pet  # original planes
+    pet_interp[1::4, :, :] = 0.75 * pet[:-1, :, :] + 0.25 * pet[1:, :, :]  # 1/4 point
+    pet_interp[2::4, :, :] = 0.50 * pet[:-1, :, :] + 0.50 * pet[1:, :, :]  # midpoint
+    pet_interp[3::4, :, :] = 0.25 * pet[:-1, :, :] + 0.75 * pet[1:, :, :]  # 3/4 point
     pet = pet_interp
 
-    # Interpolate by factor 2 in y using half-voxel-shifted sampling.
+    # Interpolate by factor 4 in y.
     ny = pet.shape[1]
-    pet_interp = np.empty((pet.shape[0], 2 * ny - 1, pet.shape[2]), dtype=pet.dtype)
-    pet_interp[:, 0::2, :] = pet  # original planes
-    pet_interp[:, 1::2, :] = 0.5 * (pet[:, :-1, :] + pet[:, 1:, :])  # midpoints
+    pet_interp = np.empty((pet.shape[0], 4 * ny - 3, pet.shape[2]), dtype=pet.dtype)
+    pet_interp[:, 0::4, :] = pet
+    pet_interp[:, 1::4, :] = 0.75 * pet[:, :-1, :] + 0.25 * pet[:, 1:, :]
+    pet_interp[:, 2::4, :] = 0.50 * pet[:, :-1, :] + 0.50 * pet[:, 1:, :]
+    pet_interp[:, 3::4, :] = 0.25 * pet[:, :-1, :] + 0.75 * pet[:, 1:, :]
     pet = pet_interp
 
-    # Interpolate by factor 2 in z using half-voxel-shifted sampling.
-    # New sampling positions in original voxel coords: 0, 0.5, 1, 1.5, ...
-    # Even new indices map to original planes (no interpolation needed).
-    # Odd new indices are the average of two neighboring original planes.
+    # Interpolate by factor 4 in z.
     nz = pet.shape[2]
-    pet_interp = np.empty((pet.shape[0], pet.shape[1], 2 * nz - 1), dtype=pet.dtype)
-    pet_interp[:, :, 0::2] = pet  # original planes
-    pet_interp[:, :, 1::2] = 0.5 * (pet[:, :, :-1] + pet[:, :, 1:])  # midpoints
+    pet_interp = np.empty((pet.shape[0], pet.shape[1], 4 * nz - 3), dtype=pet.dtype)
+    pet_interp[:, :, 0::4] = pet
+    pet_interp[:, :, 1::4] = 0.75 * pet[:, :, :-1] + 0.25 * pet[:, :, 1:]
+    pet_interp[:, :, 2::4] = 0.50 * pet[:, :, :-1] + 0.50 * pet[:, :, 1:]
+    pet_interp[:, :, 3::4] = 0.25 * pet[:, :, :-1] + 0.75 * pet[:, :, 1:]
     pet = pet_interp
 
-    voxsize_interp = voxsize / 2.0
+    voxsize_interp = voxsize / 4.0
     #############################################################################
 
     # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
