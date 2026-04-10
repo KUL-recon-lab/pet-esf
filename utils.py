@@ -153,11 +153,29 @@ def find_planes(
     # setup plane origin and normal vector in the coregistered space, which is the same as the reference image space
     vectors = dict()
 
+    vectors["x0"] = (
+        np.asarray([-0.5 * inner_cube_diam_mm - offset_scalar_mm, 0, 0]),
+        np.asarray([1.0, 0.0, 0.0]),
+    )
+    vectors["x1"] = (
+        np.asarray([0.5 * inner_cube_diam_mm + offset_scalar_mm, 0, 0]),
+        np.asarray([-1.0, 0.0, 0.0]),
+    )
+
     vectors["xs"] = (np.asarray([start_mm[0], 0, 0]), np.asarray([1.0, 0.0, 0.0]))
 
     vectors["xe"] = (
         np.asarray([end_mm[0], 0, 0]),
         np.asarray([-1.0, 0.0, 0.0]),
+    )
+
+    vectors["y0"] = (
+        np.asarray([0, -0.5 * inner_cube_diam_mm - offset_scalar_mm, 0]),
+        np.asarray([0.0, 1.0, 0.0]),
+    )
+    vectors["y1"] = (
+        np.asarray([0, 0.5 * inner_cube_diam_mm + offset_scalar_mm, 0]),
+        np.asarray([0.0, -1.0, 0.0]),
     )
 
     vectors["ys"] = (
@@ -168,6 +186,15 @@ def find_planes(
     vectors["ye"] = (
         np.asarray([0, end_mm[1], 0]),
         np.asarray([0.0, -1.0, 0.0]),
+    )
+
+    vectors["z0"] = (
+        np.asarray([0, 0, -0.5 * inner_cube_diam_mm - offset_scalar_mm]),
+        np.asarray([0, 0.0, 1.0]),
+    )
+    vectors["z1"] = (
+        np.asarray([0, 0, 0.5 * inner_cube_diam_mm + offset_scalar_mm]),
+        np.asarray([0.0, 0.0, -1.0]),
     )
 
     vectors["zs"] = (

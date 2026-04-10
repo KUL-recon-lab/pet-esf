@@ -149,10 +149,15 @@ else:
 
 roi_masks = dict()
 
-fig, ax = plt.subplots(3, 6, figsize=(18, 9), layout="constrained")
+fig, ax = plt.subplots(
+    3,
+    len(tilted_plane_vectors),
+    figsize=(len(tilted_plane_vectors) * 2.5, 3 * 2.5),
+    layout="constrained",
+)
 
-for ie, edge in enumerate(["xs", "xe", "ys", "ye", "zs", "ze"]):
-    p, n = tilted_plane_vectors[edge]
+for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
+    p, n = val
     # get the signed distance of all voxels from the plane
     Vp = V - p
     signed_plane_dist = Vp @ n

@@ -33,5 +33,5 @@ def cost(x):
 
 
 # x = [ 2.934e+01  6.554e+00]
-x0 = [29.9, 6.65]
+x0 = [29.5, 6.5]
 res = minimize(cost, x0, method="Nelder-Mead")
