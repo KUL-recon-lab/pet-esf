@@ -115,7 +115,7 @@ def find_planes(
 
     # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
     counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=200)
-    peaks, _ = find_peaks(counts, distance=5, prominence=200)
+    peaks, _ = find_peaks(counts / counts.max(), distance=20, prominence=0.05)
     intensities = sorted(bin_edges[peaks])
 
     # rigidly coregister the pet to the reference image
@@ -137,9 +137,17 @@ def find_planes(
     start_mm = -inner_cube_diam_mm / 2 + np.abs(offset_mm)
     end_mm = inner_cube_diam_mm / 2 - np.abs(offset_mm)
 
+    #################
+    # from utils_align import warp
+    # import pymirc.viewer as pv
+
     # pet_coreg = warp(pet, coreg_params, voxsize_interp)  # (D, H, W) tensor
-    # inv_coreg_params = invert_params(coreg_params)
-    # mask_coreg = warp(ref_img, inv_coreg_params, voxsize_interp)
+    # vi = pv.ThreeAxisViewer(
+    #    pet_coreg - ref_img,
+    #    voxsize=voxsize_interp,
+    #    imshow_kwargs=dict(cmap="bwr", vmin=-pet.max(), vmax=pet.max()),
+    # )
+    # breakpoint()
 
     ################################################################################
     # %%

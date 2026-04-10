@@ -13,15 +13,23 @@ from utils import find_planes
 from vis_pet import show_pet_cuts
 
 
-def save_plane_vectors(path, d):
+def save_plane_vectors(path, d, inner_cube_diam_mm, offset_scalar_mm, input_file):
+    out = {
+        "inner_cube_diam_mm": inner_cube_diam_mm,
+        "offset_scalar_mm": offset_scalar_mm,
+        "input_file": str(input_file),
+        "plane_vectors": d,
+    }
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2)
+        json.dump(out, f, indent=2)
 
 
 def load_plane_vectors(path):
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
-    return {k: tuple(v) for k, v in raw.items()}
+    # support both new (nested) and old (flat) format
+    vectors = raw.get("plane_vectors", raw)
+    return {k: tuple(v) for k, v in vectors.items()}
 
 
 def find_roots(x, y):
@@ -140,7 +148,13 @@ else:
     tilted_plane_vectors, reg_loss = find_planes(
         pet, voxsize, inner_cube_diam_mm, offset_scalar_mm
     )
-    save_plane_vectors("plane_vectors.json", tilted_plane_vectors)
+    save_plane_vectors(
+        "plane_vectors.json",
+        tilted_plane_vectors,
+        inner_cube_diam_mm,
+        offset_scalar_mm,
+        fname,
+    )
     print(f"Calculated plane vectors and saved to plane_vectors.json")
 
 ################################################################################
@@ -154,6 +168,7 @@ fig, ax = plt.subplots(
     len(tilted_plane_vectors),
     figsize=(len(tilted_plane_vectors) * 2.5, 3 * 2.5),
     layout="constrained",
+    sharey="row",
 )
 
 for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
