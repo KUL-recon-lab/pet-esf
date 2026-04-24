@@ -5,6 +5,8 @@ test.py
 data/*
 plane_vectors.json
 coreg_diff.png
+psf_from_esf.pdf
+resolution_cube.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

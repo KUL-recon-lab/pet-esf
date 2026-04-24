@@ -32,6 +32,6 @@ def cost(x):
     return reg_loss
 
 
-# x = [ 2.934e+01  6.554e+00]
-x0 = [29.5, 6.5]
-res = minimize(cost, x0, method="Nelder-Mead")
+# x0 = [29.5, 6.5]
+x0 = [49.73, 12.43]
+res = minimize(cost, x0, method="Nelder-Mead", callback=lambda x: print(x))
