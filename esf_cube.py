@@ -47,10 +47,10 @@ def find_roots(x, y):
 parser = argparse.ArgumentParser()
 parser.add_argument("fname", type=Path, help="path to the NIfTI file")
 parser.add_argument(
-    "--r1", type=float, default=8.0, help="outer ROI radius in mm along edge direction"
+    "--r1", type=float, default=9.0, help="outer ROI radius in mm along edge direction"
 )
 parser.add_argument(
-    "--r2", type=float, default=2.5, help="inner ROI radius in mm perpendicular to edge"
+    "--r2", type=float, default=4.0, help="inner ROI radius in mm perpendicular to edge"
 )
 parser.add_argument(
     "--pvf",
@@ -72,13 +72,13 @@ parser.add_argument(
 parser.add_argument(
     "--inner_cube_diam_mm",
     type=float,
-    default=29.9,
+    default=49.73,  # 49.73 for bigger phantom, 29.9 for smaller phantom
     help="diameter of the inner cube in mm for plane finding",
 )
 parser.add_argument(
     "--offset_scalar_mm",
     type=float,
-    default=6.65,
+    default=12.43,  # 12.43 for bigger phantom, 6.65 for smaller phantom
     help="scalar for calculating the plane offset from the cube diameter in mm for plane finding",
 )
 parser.add_argument(
@@ -86,6 +86,12 @@ parser.add_argument(
     type=float,
     help="FWHM of the Gaussian filter in mm for smoothing the PET data before plane finding",
     default=None,
+)
+parser.add_argument(
+    "--lam",
+    type=float,
+    help="smoothing parameter for the spline fit of the ESF (default: None, which uses scipy's default)",
+    default=3e-2,
 )
 
 args = parser.parse_args()
@@ -98,6 +104,7 @@ pvf: Path | None = args.pvf
 vis: bool = args.vis
 gap_threshold: float | None = args.gap_th
 filter_fwhm_mm: float | None = args.filter_fwhm_mm
+lam: float | None = args.lam
 
 
 inner_cube_diam_mm = args.inner_cube_diam_mm
@@ -197,7 +204,8 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
 
     # threshold: gaps much larger than the within-cluster spread
     if gap_threshold is None:
-        gap_threshold = min(np.percentile(gaps, 95) * 3.0, voxsize.min() / 2)
+        gap_threshold = min(np.percentile(gaps, 95) * 3.0, 0.05)
+    print(gap_threshold)
 
     split_indices = np.where(gaps > gap_threshold)[0] + 1
 
@@ -214,7 +222,9 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
     )
     esf_std = np.array([signal[cluster_ids == c].std() for c in np.unique(cluster_ids)])
 
-    spline = make_smoothing_spline(bin_centers, esf_binned)
+    weights = 1.0 / (np.abs(bin_centers) + 1)
+
+    spline = make_smoothing_spline(bin_centers, esf_binned, lam=lam, w=weights)
 
     #############################################################################
 
@@ -226,6 +236,7 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
 
     contrast = esf[-1] / esf[0]
 
+    # find the full width at half maximum (FWHM)
     roots_half = find_roots(ss, nlsf - 0.5)
     if len(roots_half) < 2:
         raise ValueError(f"Could not find two roots for half maximum for edge {edge}")
@@ -234,6 +245,18 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
         roots_half = sorted(sorted(roots_half, key=lambda x: abs(x))[:2])
     fwhm = roots_half[1] - roots_half[0]
 
+    # find the full width at quarter maximum (FWQM)
+    roots_quarter = find_roots(ss, nlsf - 0.25)
+    if len(roots_quarter) < 2:
+        raise ValueError(
+            f"Could not find two roots for quarter maximum for edge {edge}"
+        )
+    if len(roots_quarter) > 2:
+        # take the two roots that are closest to the center (0 mm)
+        roots_quarter = sorted(sorted(roots_quarter, key=lambda x: abs(x))[:2])
+    fwqm = roots_quarter[1] - roots_quarter[0]
+
+    # find the full width at tenth maximum (FWTM)
     roots_tenth = find_roots(ss, nlsf - 0.1)
     if len(roots_tenth) < 2:
         raise ValueError(f"Could not find two roots for tenth maximum for edge {edge}")
@@ -244,7 +267,7 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
     fwtm = roots_tenth[1] - roots_tenth[0]
 
     print(
-        f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWTM: {fwtm:.2f} mm"
+        f"{data_dir.stem}; {fname.name}; {edge}; contrast: {contrast:.1f}; FWHM: {fwhm:.2f} mm; FWQM: {fwqm:.2f} mm; FWTM: {fwtm:.2f} mm"
     )
 
     # calculate the MTF
@@ -277,6 +300,21 @@ for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
         0.5 * roots_half[1],
         0.5,
         f"FWHM: {fwhm:.2f} mm",
+        ha="left",
+        va="bottom",
+        fontsize="x-small",
+    )
+    ax[1, ie].axhline(
+        0.25,
+        color="gray",
+        ls="--",
+        xmin=(roots_quarter[0] - xmin_ax) / (xmax_ax - xmin_ax),
+        xmax=(roots_quarter[-1] - xmin_ax) / (xmax_ax - xmin_ax),
+    )
+    ax[1, ie].text(
+        0.5 * roots_quarter[1],
+        0.25,
+        f"FWQM: {fwqm:.2f} mm",
         ha="left",
         va="bottom",
         fontsize="x-small",
@@ -315,6 +353,7 @@ for axx in ax[2, :]:
     axx.set_xlabel("spatial freq. (1/mm)")
 
 fig.suptitle(str(fname), fontsize="small")
+fig.savefig("psf_from_esf.pdf")
 
 if vis:
     counts, bin_edges = np.histogram(
@@ -323,7 +362,7 @@ if vis:
     peaks, _ = find_peaks(counts, distance=5, prominence=200)
     intensities = sorted(bin_edges[peaks])
 
-    _fig_vis, _ax_vis, _widgets_vis = show_pet_cuts(
+    fig_vis, _ax_vis, _widgets_vis = show_pet_cuts(
         pet[slices],
         x_crop,
         y_crop,
@@ -333,5 +372,6 @@ if vis:
         vmax=1.2 * intensities[-1],
         fig_title=str(fname),
     )
+    fig_vis.savefig("resolution_cube.png", dpi=300)
 
 plt.show()
