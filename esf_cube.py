@@ -330,7 +330,14 @@ def main(
             fontsize="x-small",
         )
 
-        ax[0, ie].set_title(f"{edge} contrast: {contrast:.1f}", fontsize="medium")
+        if edge.startswith("x"):
+            pos = p[0]
+        elif edge.startswith("y"):
+            pos = p[1]
+        elif edge.startswith("z"):
+            pos = p[2]
+
+        ax[0, ie].set_title(f"{edge} {pos:.1f} c: {contrast:.1f}", fontsize="medium")
 
         edge_res = dict()
         edge_res["contrast"] = contrast
@@ -341,6 +348,9 @@ def main(
         edge_res["lsf"] = lsf
         edge_res["nlsf"] = nlsf
         edge_res["mtf"] = mtf
+        edge_res["p"] = p
+        edge_res["n"] = n
+        edge_res["pos"] = pos
 
         res[edge] = edge_res
 
