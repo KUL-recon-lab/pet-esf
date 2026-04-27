@@ -11,3 +11,4 @@ dependencies:
   - dcmtk
   - dcm2nixx
   - pytorch
+  - typer

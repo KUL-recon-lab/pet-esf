@@ -1,7 +1,8 @@
-import argparse
 import json
 from pathlib import Path
+from typing import Annotated
 
+import typer
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
@@ -43,20 +44,20 @@ def find_roots(x, y):
 
 
 def main(
-    fname: Path,
-    data_dir: Path,
-    r1: float = 9.0,
-    r2: float = 4.0,
-    pvf: Path | None = None,
-    vis: bool = True,
-    gap_threshold: float | None = None,
-    filter_fwhm_mm: float | None = None,
-    lam: float | None = 3e-2,
-    inner_cube_diam_mm: float = 49.73,
-    offset_scalar_mm: float = 12.43,
-    esf_plot_path: Path | None = Path("psf_from_esf.pdf"),
-    vis_plot_path: Path | None = Path("resolution_cube.png"),
+    fname: Annotated[Path, typer.Argument(help="path to the NIfTI file")],
+    r1: Annotated[float, typer.Option(help="outer ROI radius in mm along edge direction")] = 9.0,
+    r2: Annotated[float, typer.Option(help="inner ROI radius in mm perpendicular to edge")] = 4.0,
+    pvf: Annotated[Path | None, typer.Option(help="file with plane vectors (json)")] = None,
+    vis: Annotated[bool, typer.Option(help="open interactive PET viewer with plane overlay")] = False,
+    gap_threshold: Annotated[float | None, typer.Option(help="ESF cluster split threshold in mm (default: 3x the 95th percentile of gaps)")] = None,
+    filter_fwhm_mm: Annotated[float | None, typer.Option(help="FWHM of Gaussian pre-filter in mm")] = None,
+    lam: Annotated[float | None, typer.Option(help="smoothing parameter for the spline fit of the ESF")] = 3e-2,
+    inner_cube_diam_mm: Annotated[float, typer.Option(help="diameter of the inner cube in mm (49.73 big phantom, 29.9 small)")] = 49.73,
+    offset_scalar_mm: Annotated[float, typer.Option(help="plane offset scalar in mm (12.43 big phantom, 6.65 small)")] = 12.43,
+    esf_plot_path: Annotated[Path | None, typer.Option(help="path to save the ESF, LSF, and MTF plots")] = Path("psf_from_esf.pdf"),
+    vis_plot_path: Annotated[Path | None, typer.Option(help="path to save the PET cuts visualization")] = Path("resolution_cube.png"),
 ):
+    data_dir = fname.parent
     # %%
     # READ THE DATA FROM NIFTI, orient to RAS
 
@@ -334,94 +335,8 @@ def main(
         if vis_plot_path is not None:
             fig_vis.savefig(vis_plot_path, dpi=300)
 
+    plt.show()
+
 
 if __name__ == "__main__":
-    # %%
-    # input parameters
-    parser = argparse.ArgumentParser()
-    parser.add_argument("fname", type=Path, help="path to the NIfTI file")
-    parser.add_argument(
-        "--r1",
-        type=float,
-        default=9.0,
-        help="outer ROI radius in mm along edge direction",
-    )
-    parser.add_argument(
-        "--r2",
-        type=float,
-        default=4.0,
-        help="inner ROI radius in mm perpendicular to edge",
-    )
-    parser.add_argument(
-        "--pvf",
-        type=Path,
-        default=None,
-        help="file containing the plane vectors in json format",
-    )
-    parser.add_argument(
-        "--vis",
-        action="store_true",
-        help="open interactive 3-axis PET viewer with plane overlay",
-    )
-    parser.add_argument(
-        "--gap_th",
-        type=float,
-        default=None,
-        help="threshold for splitting ESF clusters in mm (default: 3x the 95th percentile of gaps)",
-    )
-    parser.add_argument(
-        "--inner_cube_diam_mm",
-        type=float,
-        default=49.73,  # 49.73 for bigger phantom, 29.9 for smaller phantom
-        help="diameter of the inner cube in mm for plane finding",
-    )
-    parser.add_argument(
-        "--offset_scalar_mm",
-        type=float,
-        default=12.43,  # 12.43 for bigger phantom, 6.65 for smaller phantom
-        help="scalar for calculating the plane offset from the cube diameter in mm for plane finding",
-    )
-    parser.add_argument(
-        "--filter_fwhm_mm",
-        type=float,
-        help="FWHM of the Gaussian filter in mm for smoothing the PET data before plane finding",
-        default=None,
-    )
-    parser.add_argument(
-        "--lam",
-        type=float,
-        help="smoothing parameter for the spline fit of the ESF (default: None, which uses scipy's default)",
-        default=3e-2,
-    )
-    parser.add_argument(
-        "--esf_plot_path",
-        type=Path,
-        default=Path("psf_from_esf.pdf"),
-        help="path to save the ESF, LSF, and MTF plots",
-    )
-    parser.add_argument(
-        "--vis_plot_path",
-        type=Path,
-        default=Path("resolution_cube.png"),
-        help="path to save the PET cuts visualization",
-    )
-
-    args = parser.parse_args()
-
-    main(
-        fname=args.fname,
-        data_dir=args.fname.parent,
-        r1=args.r1,
-        r2=args.r2,
-        pvf=args.pvf,
-        vis=args.vis,
-        gap_threshold=args.gap_th,
-        filter_fwhm_mm=args.filter_fwhm_mm,
-        lam=args.lam,
-        inner_cube_diam_mm=args.inner_cube_diam_mm,
-        offset_scalar_mm=args.offset_scalar_mm,
-        esf_plot_path=args.esf_plot_path,
-        vis_plot_path=args.vis_plot_path,
-    )
-
-    plt.show()
+    typer.run(main)
