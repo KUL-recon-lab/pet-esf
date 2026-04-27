@@ -111,6 +111,10 @@ def main(
         )
         print(f"Calculated plane vectors and saved to plane_vectors.json")
 
+    # drop old (wrong) edge definitions (inf contrast, but at different locations)
+    for edge in ["x0", "y0", "z0", "x1", "y1", "z1"]:
+        tilted_plane_vectors.pop(edge, None)
+
     ################################################################################
     # %%
     # calculate the distance from the edge
