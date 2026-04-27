@@ -45,18 +45,52 @@ def find_roots(x, y):
 
 def main(
     fname: Annotated[Path, typer.Argument(help="path to the NIfTI file")],
-    r1: Annotated[float, typer.Option(help="outer ROI radius in mm along edge direction")] = 9.0,
-    r2: Annotated[float, typer.Option(help="inner ROI radius in mm perpendicular to edge")] = 4.0,
-    pvf: Annotated[Path | None, typer.Option(help="file with plane vectors (json)")] = None,
-    vis: Annotated[bool, typer.Option(help="open interactive PET viewer with plane overlay")] = False,
-    gap_threshold: Annotated[float | None, typer.Option(help="ESF cluster split threshold in mm (default: 3x the 95th percentile of gaps)")] = None,
-    filter_fwhm_mm: Annotated[float | None, typer.Option(help="FWHM of Gaussian pre-filter in mm")] = None,
-    lam: Annotated[float | None, typer.Option(help="smoothing parameter for the spline fit of the ESF")] = 3e-2,
-    inner_cube_diam_mm: Annotated[float, typer.Option(help="diameter of the inner cube in mm (49.73 big phantom, 29.9 small)")] = 49.73,
-    offset_scalar_mm: Annotated[float, typer.Option(help="plane offset scalar in mm (12.43 big phantom, 6.65 small)")] = 12.43,
-    esf_plot_path: Annotated[Path | None, typer.Option(help="path to save the ESF, LSF, and MTF plots")] = Path("psf_from_esf.pdf"),
-    vis_plot_path: Annotated[Path | None, typer.Option(help="path to save the PET cuts visualization")] = Path("resolution_cube.png"),
-):
+    r1: Annotated[
+        float, typer.Option(help="outer ROI radius in mm along edge direction")
+    ] = 9.0,
+    r2: Annotated[
+        float, typer.Option(help="inner ROI radius in mm perpendicular to edge")
+    ] = 4.0,
+    pvf: Annotated[
+        Path | None, typer.Option(help="file with plane vectors (json)")
+    ] = None,
+    vis: Annotated[
+        bool, typer.Option(help="open interactive PET viewer with plane overlay")
+    ] = False,
+    gap_threshold: Annotated[
+        float | None,
+        typer.Option(
+            help="ESF cluster split threshold in mm (default: 3x the 95th percentile of gaps)"
+        ),
+    ] = None,
+    filter_fwhm_mm: Annotated[
+        float | None, typer.Option(help="FWHM of Gaussian pre-filter in mm")
+    ] = None,
+    lam: Annotated[
+        float | None,
+        typer.Option(help="smoothing parameter for the spline fit of the ESF"),
+    ] = 3e-2,
+    inner_cube_diam_mm: Annotated[
+        float,
+        typer.Option(
+            help="diameter of the inner cube in mm (49.73 big phantom, 29.9 small)"
+        ),
+    ] = 49.73,
+    offset_scalar_mm: Annotated[
+        float,
+        typer.Option(help="plane offset scalar in mm (12.43 big phantom, 6.65 small)"),
+    ] = 12.43,
+    esf_plot_path: Annotated[
+        Path | None, typer.Option(help="path to save the ESF, LSF, and MTF plots")
+    ] = Path("psf_from_esf.pdf"),
+    vis_plot_path: Annotated[
+        Path | None, typer.Option(help="path to save the PET cuts visualization")
+    ] = Path("resolution_cube.png"),
+    verbose: Annotated[
+        bool, typer.Option(help="print additional information during processing")
+    ] = False,
+) -> dict:
+
     data_dir = fname.parent
     # %%
     # READ THE DATA FROM NIFTI, orient to RAS
@@ -110,7 +144,8 @@ def main(
             offset_scalar_mm,
             fname,
         )
-        print(f"Calculated plane vectors and saved to plane_vectors.json")
+        if verbose:
+            print(f"Calculated plane vectors and saved to plane_vectors.json")
 
     # drop old (wrong) edge definitions (inf contrast, but at different locations)
     for edge in ["x0", "y0", "z0", "x1", "y1", "z1"]:
@@ -129,6 +164,8 @@ def main(
         layout="constrained",
         sharey="row",
     )
+
+    res = dict()
 
     for ie, (edge, val) in enumerate(tilted_plane_vectors.items()):
         p, n = val
@@ -295,6 +332,18 @@ def main(
 
         ax[0, ie].set_title(f"{edge} contrast: {contrast:.1f}", fontsize="medium")
 
+        edge_res = dict()
+        edge_res["contrast"] = contrast
+        edge_res["fwhm_mm"] = fwhm
+        edge_res["fwqm_mm"] = fwqm
+        edge_res["fwtm_mm"] = fwtm
+        edge_res["esf"] = esf
+        edge_res["lsf"] = lsf
+        edge_res["nlsf"] = nlsf
+        edge_res["mtf"] = mtf
+
+        res[edge] = edge_res
+
     ax[0, 0].set_ylabel(f"ESF", fontsize="medium")
     ax[1, 0].set_ylabel(f"norm. LSF", fontsize="medium")
     ax[2, 0].set_ylabel(f"norm. MTF", fontsize="medium")
@@ -314,6 +363,8 @@ def main(
 
     if esf_plot_path is not None:
         fig.savefig(esf_plot_path)
+
+    fig.show()
 
     if vis:
         counts, bin_edges = np.histogram(
@@ -335,7 +386,9 @@ def main(
         if vis_plot_path is not None:
             fig_vis.savefig(vis_plot_path, dpi=300)
 
-    plt.show()
+        fig_vis.show()
+
+    return res
 
 
 if __name__ == "__main__":
