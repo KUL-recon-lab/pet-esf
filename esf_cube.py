@@ -337,7 +337,7 @@ def main(
         elif edge.startswith("z"):
             pos = p[2]
 
-        ax[0, ie].set_title(f"{edge} {pos:.1f} c: {contrast:.1f}", fontsize="medium")
+        ax[0, ie].set_title(f"{edge} {pos:.1f}mm c: {contrast:.1f}", fontsize="medium")
 
         edge_res = dict()
         edge_res["contrast"] = contrast
