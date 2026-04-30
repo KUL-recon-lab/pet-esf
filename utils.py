@@ -86,7 +86,11 @@ def make_two_cubes(
 
 
 def find_planes(
-    pet_vol, voxsize, inner_cube_diam_mm: float, offset_scalar_mm: float
+    pet_vol,
+    voxsize,
+    inner_cube_diam_mm: float,
+    offset_scalar_mm: float = 0.0,
+    num_cubes: int = 2,
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], float]:
     # crop pet_vol to bounding box of non-zero values
     pet_sm = gaussian_filter(pet_vol, 4.0 / (2.35 * voxsize))
@@ -136,26 +140,35 @@ def find_planes(
     voxsize_interp = voxsize / 4.0
     #############################################################################
 
-    # get the 3 dominant intensity values in the pet image, which should correspond to the two cubes and the overlap
     counts, bin_edges = np.histogram(pet[pet > 0.1 * pet.max()].ravel(), bins=400)
     peaks, _ = find_peaks(counts / counts.max(), distance=8, prominence=0.1)
     intensities = sorted(bin_edges[peaks])
 
-    # rigidly coregister the pet to the reference image
-    ref_img = make_two_cubes(
-        inner_cube_diam_mm,
-        offset_scalar_mm,
-        pet.shape,
-        voxsize_interp,
-        intensities[0],
-        intensities[1],
-    )
+    if num_cubes == 2:
+        ref_img = make_two_cubes(
+            inner_cube_diam_mm,
+            offset_scalar_mm,
+            pet.shape,
+            voxsize_interp,
+            intensities[0],
+            intensities[1],
+        )
+        offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
+    elif num_cubes == 1:
+        ref_img = make_single_cube(
+            inner_cube_diam_mm,
+            (0.0, 0.0, 0.0),
+            pet.shape,
+            voxsize_interp,
+            intensities[0],
+        )
+        offset_mm = np.zeros(3)
+    else:
+        raise ValueError(f"num_cubes must be 1 or 2, got {num_cubes}.")
+
     coreg_params, final_loss = register(ref_img, pet, voxsize_interp, ncc)
 
-    # setup the start and end coordinates of the inner overlapping cube in world coordinates (of the cropped image)
-    offset_mm = offset_scalar_mm * np.array([-1.0, 1.0, 1.0])
-
-    # world coordinates of the start and end of the edge between the two cubes
+    # start/end face positions of the relevant edge (inner overlap for two_cubes, outer faces for single_cube)
     start_mm = -inner_cube_diam_mm / 2 + np.abs(offset_mm)
     end_mm = inner_cube_diam_mm / 2 - np.abs(offset_mm)
 
