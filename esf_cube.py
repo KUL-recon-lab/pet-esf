@@ -80,6 +80,9 @@ def main(
         float,
         typer.Option(help="plane offset scalar in mm (12.43 big phantom, 6.65 small)"),
     ] = 12.43,
+    num_cubes: Annotated[
+        int, typer.Option(help="number of cubes in the phantom (1 or 2)")
+    ] = 2,
     esf_plot_path: Annotated[
         Path | None, typer.Option(help="path to save the ESF, LSF, and MTF plots")
     ] = Path("psf_from_esf.pdf"),
@@ -112,10 +115,13 @@ def main(
     X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
 
     # pad slices by 10 voxels in each direction
-    slices = find_objects((pet > 0.05 * pet.max()).astype(int))[0]
-    pad = 10
+    pet_sm = gaussian_filter(pet, 4.0 / (2.35 * voxsize))
+    slices = find_objects((pet_sm > 0.05 * pet_sm.max()).astype(int))[0]
+    del pet_sm
+
+    pad = [int(10 / vx) for vx in voxsize]
     slices = tuple(
-        slice(max(0, s.start - pad), min(pet.shape[i], s.stop + pad))
+        slice(max(0, s.start - pad[i]), min(pet.shape[i], s.stop + pad[i]))
         for i, s in enumerate(slices)
     )
     X = X[slices]
@@ -135,7 +141,7 @@ def main(
         print(f"Loaded plane vectors from {pvf}")
     else:
         tilted_plane_vectors, reg_loss = find_planes(
-            pet, voxsize, inner_cube_diam_mm, offset_scalar_mm
+            pet, voxsize, slices, inner_cube_diam_mm, offset_scalar_mm, num_cubes
         )
         save_plane_vectors(
             "plane_vectors.json",

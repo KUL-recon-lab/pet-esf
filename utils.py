@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import find_objects, gaussian_filter
 from scipy.signal import find_peaks
 
 from utils_align import register, transform_plane, warp
@@ -88,21 +87,11 @@ def make_two_cubes(
 def find_planes(
     pet_vol,
     voxsize,
+    slices,
     inner_cube_diam_mm: float,
     offset_scalar_mm: float = 0.0,
     num_cubes: int = 2,
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], float]:
-    # crop pet_vol to bounding box of non-zero values
-    pet_sm = gaussian_filter(pet_vol, 4.0 / (2.35 * voxsize))
-    slices = find_objects((pet_sm > 0.05 * pet_sm.max()).astype(int))[0]
-    del pet_sm
-
-    # pad slices by 10 voxels in each direction
-    pad = 10
-    slices = tuple(
-        slice(max(0, s.start - pad), min(pet_vol.shape[i], s.stop + pad))
-        for i, s in enumerate(slices)
-    )
 
     pet = pet_vol[slices]
 
@@ -157,7 +146,8 @@ def find_planes(
     elif num_cubes == 1:
         ref_img = make_single_cube(
             inner_cube_diam_mm,
-            (0.0, 0.0, 0.0),
+            # (+offset_scalar_mm, -offset_scalar_mm, -offset_scalar_mm),
+            (0, 0, 0),
             pet.shape,
             voxsize_interp,
             intensities[0],
@@ -208,59 +198,56 @@ def find_planes(
     # setup plane origin and normal vector in the coregistered space, which is the same as the reference image space
     vectors = dict()
 
-    # vectors["x0"] = (
-    #    np.asarray([-0.5 * inner_cube_diam_mm - offset_scalar_mm, 0, 0]),
-    #    np.asarray([1.0, 0.0, 0.0]),
-    # )
-    # vectors["x1"] = (
-    #    np.asarray([0.5 * inner_cube_diam_mm + offset_scalar_mm, 0, 0]),
-    #    np.asarray([-1.0, 0.0, 0.0]),
-    # )
-
     vectors["xs"] = (np.asarray([start_mm[0], 0, 0]), np.asarray([1.0, 0.0, 0.0]))
+
+    if num_cubes == 1:
+        vectors["xs"][0][1] += offset_scalar_mm
+        vectors["xs"][0][2] += offset_scalar_mm
 
     vectors["xe"] = (
         np.asarray([end_mm[0], 0, 0]),
         np.asarray([-1.0, 0.0, 0.0]),
     )
 
-    # vectors["y0"] = (
-    #    np.asarray([0, -0.5 * inner_cube_diam_mm - offset_scalar_mm, 0]),
-    #    np.asarray([0.0, 1.0, 0.0]),
-    # )
-    # vectors["y1"] = (
-    #    np.asarray([0, 0.5 * inner_cube_diam_mm + offset_scalar_mm, 0]),
-    #    np.asarray([0.0, -1.0, 0.0]),
-    # )
+    if num_cubes == 1:
+        vectors["xe"][0][1] += offset_scalar_mm
+        vectors["xe"][0][2] += offset_scalar_mm
 
     vectors["ys"] = (
         np.asarray([0, start_mm[1], 0]),
         np.asarray([0.0, 1.0, 0.0]),
     )
 
+    if num_cubes == 1:
+        vectors["ys"][0][0] -= offset_scalar_mm / 2
+        vectors["ys"][0][2] += offset_scalar_mm / 2
+
     vectors["ye"] = (
         np.asarray([0, end_mm[1], 0]),
         np.asarray([0.0, -1.0, 0.0]),
     )
 
-    # vectors["z0"] = (
-    #    np.asarray([0, 0, -0.5 * inner_cube_diam_mm - offset_scalar_mm]),
-    #    np.asarray([0, 0.0, 1.0]),
-    # )
-    # vectors["z1"] = (
-    #    np.asarray([0, 0, 0.5 * inner_cube_diam_mm + offset_scalar_mm]),
-    #    np.asarray([0.0, 0.0, -1.0]),
-    # )
+    if num_cubes == 1:
+        vectors["ye"][0][0] -= offset_scalar_mm / 2
+        vectors["ye"][0][2] += offset_scalar_mm / 2
 
     vectors["zs"] = (
         np.asarray([0, 0, start_mm[2]]),
         np.asarray([0.0, 0.0, 1.0]),
     )
 
+    if num_cubes == 1:
+        vectors["zs"][0][0] -= offset_scalar_mm / 2
+        vectors["zs"][0][1] += offset_scalar_mm / 2
+
     vectors["ze"] = (
         np.asarray([0, 0, end_mm[2]]),
         np.asarray([0.0, 0.0, -1.0]),
     )
+
+    if num_cubes == 1:
+        vectors["ze"][0][0] -= offset_scalar_mm / 2
+        vectors["ze"][0][1] += offset_scalar_mm / 2
 
     # transform vectors to tilted space
 
