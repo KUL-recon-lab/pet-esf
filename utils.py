@@ -8,6 +8,48 @@ from metrics import ncc
 from vis_pet import show_pet_cuts
 
 
+def make_single_cube(
+    d: float,
+    c: tuple[float, float, float],
+    shape: tuple[int, int, int],
+    voxel_size: tuple[float, float, float],
+    val: float = 1.0,
+) -> np.ndarray:
+    """
+    Create a float voxel volume containing a single axis-aligned cube.
+
+    Parameters
+    ----------
+    d          : side length of the cube (same in all directions) [mm]
+    c          : (cx, cy, cz) – world coordinates of the cube centre [mm];
+                 volume centre = world (0, 0, 0)
+    shape      : (nx, ny, nz) – number of voxels along each axis
+    voxel_size : (vx, vy, vz) – physical size of one voxel [mm]
+    val        : intensity value inside the cube
+
+    Returns
+    -------
+    volume : np.ndarray, dtype float32, shape (nx, ny, nz)
+    """
+    nx, ny, nz = shape
+    vx, vy, vz = voxel_size
+    cx, cy, cz = c
+    half_d = d / 2.0
+
+    xs = (np.arange(nx) - (nx - 1) / 2.0) * vx
+    ys = (np.arange(ny) - (ny - 1) / 2.0) * vy
+    zs = (np.arange(nz) - (nz - 1) / 2.0) * vz
+
+    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
+
+    mask = (
+        (np.abs(X - cx) <= half_d)
+        & (np.abs(Y - cy) <= half_d)
+        & (np.abs(Z - cz) <= half_d)
+    )
+    return mask.astype(np.float32) * val
+
+
 def make_two_cubes(
     d: float,
     o: float,
@@ -34,34 +76,13 @@ def make_two_cubes(
     volume : np.ndarray, dtype float32, shape (nx, ny, nz)
         Voxel values are val1, val2, or val1+val2 in the overlap region.
     """
-    nx, ny, nz = shape
-    vx, vy, vz = voxel_size
-    half_d = d / 2.0
-
-    # World coordinates of every voxel centre; volume centre = world (0,0,0)
-    xs = (np.arange(nx) - (nx - 1) / 2.0) * vx
-    ys = (np.arange(ny) - (ny - 1) / 2.0) * vy
-    zs = (np.arange(nz) - (nz - 1) / 2.0) * vz
-
-    X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
-
-    def cube_mask(cx, cy, cz) -> np.ndarray:
-        return (
-            (np.abs(X - cx) <= half_d)
-            & (np.abs(Y - cy) <= half_d)
-            & (np.abs(Z - cz) <= half_d)
-        )
-
     o0 = offset_signs[0] * o
     o1 = offset_signs[1] * o
     o2 = offset_signs[2] * o
 
-    volume = (
-        cube_mask(-o0, -o1, -o2).astype(np.float32) * val1
-        + cube_mask(o0, o1, o2).astype(np.float32) * val2
-    )
-
-    return volume
+    return make_single_cube(
+        d, (-o0, -o1, -o2), shape, voxel_size, val1
+    ) + make_single_cube(d, (o0, o1, o2), shape, voxel_size, val2)
 
 
 def find_planes(
