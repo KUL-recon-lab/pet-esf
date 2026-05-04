@@ -44,22 +44,36 @@ def find_roots(x, y):
 
 
 def _otsu_threshold(values):
+    """Returns (threshold, between_class_variance_ratio in [0, 1])."""
     hist, bin_edges = np.histogram(values, bins=256)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
     total = hist.sum()
     total_sum = np.dot(bin_centers, hist)
+    total_mean = total_sum / total
+    total_var = np.dot(hist, (bin_centers - total_mean) ** 2) / total
     w0, sum0, best_var, best_thresh = 0, 0.0, 0.0, bin_centers[0]
-    for i in range(len(hist)):
-        w0 += hist[i]
+    for i, h in enumerate(hist):
+        w0 += h
         w1 = total - w0
         if w0 == 0 or w1 == 0:
             continue
-        sum0 += bin_centers[i] * hist[i]
+        sum0 += bin_centers[i] * h
         mu0, mu1 = sum0 / w0, (total_sum - sum0) / w1
-        var_between = w0 * w1 * (mu0 - mu1) ** 2
+        var_between = (w0 * w1 / total**2) * (mu0 - mu1) ** 2
         if var_between > best_var:
             best_var, best_thresh = var_between, bin_centers[i]
-    return best_thresh
+    ratio = best_var / total_var if total_var > 0 else 0.0
+    return best_thresh, ratio
+
+
+def _detect_num_cubes(pet, slices, voxsize, smooth_fwhm_mm=4.0):
+    pet_sm = gaussian_filter(pet[slices], sigma=smooth_fwhm_mm / (2.35 * voxsize))
+    fg = pet_sm[pet_sm > 0.05 * pet_sm.max()]
+    fg_norm = fg / fg.max()
+    hist, _ = np.histogram(fg_norm, bins=64, range=(0, 1))
+    hist = hist / hist.max()
+    peaks, _ = find_peaks(hist, prominence=0.02)
+    return 1 if len(peaks) == 2 else 2
 
 
 def main(
@@ -112,8 +126,11 @@ def main(
         typer.Option(help="plane offset scalar in mm (12.43 big phantom, 6.65 small)"),
     ] = 12.43,
     num_cubes: Annotated[
-        int, typer.Option(help="number of cubes in the phantom (1 or 2)")
-    ] = 2,
+        int | None,
+        typer.Option(
+            help="number of cubes in the phantom (1 or 2); auto-detected if not set"
+        ),
+    ] = None,
     esf_plot_path: Annotated[
         Path | None, typer.Option(help="path to save the ESF, LSF, and MTF plots")
     ] = Path("psf_from_esf.pdf"),
@@ -165,6 +182,11 @@ def main(
     z_crop = z[slices[2]]
 
     V = np.stack([X, Y, Z], axis=-1)
+    if num_cubes is None:
+        num_cubes = _detect_num_cubes(pet, slices, voxsize)
+        if verbose:
+            print(f"Auto-detected num_cubes = {num_cubes}")
+
     ################################################################################
     # %%
     if pvf is not None and pvf.exists():
@@ -234,7 +256,9 @@ def main(
         gaps_capped = np.minimum(gaps, gap_cap)
 
         thresh = (
-            gap_threshold if gap_threshold is not None else _otsu_threshold(gaps_capped)
+            gap_threshold
+            if gap_threshold is not None
+            else _otsu_threshold(gaps_capped)[0]
         )
 
         split_indices = np.where(gaps > thresh)[0] + 1
@@ -282,7 +306,9 @@ def main(
             [signal[cluster_ids == c].mean() for c in unique_clusters]
         )
         cluster_counts = np.array([np.sum(cluster_ids == c) for c in unique_clusters])
-        print("CC", cluster_counts)
+
+        if verbose:
+            print(f"{edge} cluster counts: {cluster_counts}")
 
         weights = cluster_counts.astype(float) / cluster_counts.max()
 
