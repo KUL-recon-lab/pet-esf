@@ -43,6 +43,25 @@ def find_roots(x, y):
     return np.array(roots)
 
 
+def _otsu_threshold(values):
+    hist, bin_edges = np.histogram(values, bins=256)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    total = hist.sum()
+    total_sum = np.dot(bin_centers, hist)
+    w0, sum0, best_var, best_thresh = 0, 0.0, 0.0, bin_centers[0]
+    for i in range(len(hist)):
+        w0 += hist[i]
+        w1 = total - w0
+        if w0 == 0 or w1 == 0:
+            continue
+        sum0 += bin_centers[i] * hist[i]
+        mu0, mu1 = sum0 / w0, (total_sum - sum0) / w1
+        var_between = w0 * w1 * (mu0 - mu1) ** 2
+        if var_between > best_var:
+            best_var, best_thresh = var_between, bin_centers[i]
+    return best_thresh
+
+
 def main(
     fname: Annotated[Path, typer.Argument(help="path to the NIfTI file")],
     r1: Annotated[
@@ -60,16 +79,28 @@ def main(
     gap_threshold: Annotated[
         float | None,
         typer.Option(
-            help="ESF cluster split threshold in mm (default: 3x the 95th percentile of gaps)"
+            help="ESF cluster split threshold in mm (default: Otsu on gap distribution)"
         ),
     ] = None,
+    min_clusters: Annotated[
+        int,
+        typer.Option(
+            help="minimum number of ESF clusters; triggers uniform-bin fallback if not met"
+        ),
+    ] = 20,
+    min_count: Annotated[
+        int,
+        typer.Option(
+            help="minimum points per cluster; smaller clusters are merged into nearest neighbor"
+        ),
+    ] = 40,
     filter_fwhm_mm: Annotated[
         float | None, typer.Option(help="FWHM of Gaussian pre-filter in mm")
     ] = None,
     lam: Annotated[
         float | None,
         typer.Option(help="smoothing parameter for the spline fit of the ESF"),
-    ] = 3e-2,
+    ] = 1e-2,
     inner_cube_diam_mm: Annotated[
         float,
         typer.Option(
@@ -197,31 +228,62 @@ def main(
 
         gaps = np.diff(sd)
 
-        # threshold: gaps much larger than the within-cluster spread
-        if gap_threshold is None:
-            gap_threshold = min(np.percentile(gaps, 95) * 3.0, 0.05)
-        print(gap_threshold)
+        # clip extreme outlier gaps before Otsu so a single large air-gap
+        # does not pull the threshold too high
+        gap_cap = 5 * np.median(gaps)
+        gaps_capped = np.minimum(gaps, gap_cap)
 
-        split_indices = np.where(gaps > gap_threshold)[0] + 1
+        thresh = (
+            gap_threshold if gap_threshold is not None else _otsu_threshold(gaps_capped)
+        )
+
+        split_indices = np.where(gaps > thresh)[0] + 1
 
         cluster_ids = np.zeros(len(sd), dtype=int)
         cluster_ids[split_indices] = 1
         cluster_ids = np.cumsum(cluster_ids)
 
-        # for each cluster: mean distance and mean signal
-        bin_centers = np.array(
-            [sd[cluster_ids == c].mean() for c in np.unique(cluster_ids)]
-        )
-        esf_binned = np.array(
-            [signal[cluster_ids == c].mean() for c in np.unique(cluster_ids)]
-        )
-        esf_std = np.array(
-            [signal[cluster_ids == c].std() for c in np.unique(cluster_ids)]
-        )
+        # fallback: too few clusters → uniform bins
+        if cluster_ids[-1] + 1 < min_clusters:
+            bin_edges = np.linspace(sd[0], sd[-1], min_clusters + 1)
+            cluster_ids = np.digitize(sd, bin_edges[1:-1])
 
-        cluster_counts = np.array(
-            [np.sum(cluster_ids == c) for c in np.unique(cluster_ids)]
+        # merge undersized clusters into nearest neighbour by bin-center distance
+        unique_clusters = np.unique(cluster_ids)
+        bin_centers_raw = np.array(
+            [sd[cluster_ids == c].mean() for c in unique_clusters]
         )
+        counts_raw = np.array([np.sum(cluster_ids == c) for c in unique_clusters])
+
+        merged = True
+        while merged:
+            merged = False
+            for idx in range(len(unique_clusters)):
+                if counts_raw[idx] < min_count:
+                    distances = np.abs(bin_centers_raw - bin_centers_raw[idx])
+                    distances[idx] = np.inf
+                    neighbour = np.argmin(distances)
+                    # reassign points to neighbour cluster
+                    mask = cluster_ids == unique_clusters[idx]
+                    cluster_ids[mask] = unique_clusters[neighbour]
+                    # update tracking arrays
+                    combined_mask = cluster_ids == unique_clusters[neighbour]
+                    counts_raw[neighbour] = np.sum(combined_mask)
+                    bin_centers_raw[neighbour] = sd[combined_mask].mean()
+                    unique_clusters = np.delete(unique_clusters, idx)
+                    bin_centers_raw = np.delete(bin_centers_raw, idx)
+                    counts_raw = np.delete(counts_raw, idx)
+                    merged = True
+                    break
+
+        unique_clusters = np.unique(cluster_ids)
+        bin_centers = np.array([sd[cluster_ids == c].mean() for c in unique_clusters])
+        esf_binned = np.array(
+            [signal[cluster_ids == c].mean() for c in unique_clusters]
+        )
+        cluster_counts = np.array([np.sum(cluster_ids == c) for c in unique_clusters])
+        print("CC", cluster_counts)
+
         weights = cluster_counts.astype(float) / cluster_counts.max()
 
         spline = make_smoothing_spline(bin_centers, esf_binned, lam=lam, w=weights)
