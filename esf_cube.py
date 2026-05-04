@@ -219,7 +219,10 @@ def main(
             [signal[cluster_ids == c].std() for c in np.unique(cluster_ids)]
         )
 
-        weights = 1.0 / (np.abs(bin_centers) + 1)
+        cluster_counts = np.array(
+            [np.sum(cluster_ids == c) for c in np.unique(cluster_ids)]
+        )
+        weights = cluster_counts.astype(float) / cluster_counts.max()
 
         spline = make_smoothing_spline(bin_centers, esf_binned, lam=lam, w=weights)
 
